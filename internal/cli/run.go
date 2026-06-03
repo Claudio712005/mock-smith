@@ -2,6 +2,7 @@ package cli
 
 import (
 	"strings"
+	"time"
 
 	"github.com/Claudio712005/mock-smith/internal/app"
 	"github.com/Claudio712005/mock-smith/internal/scenario"
@@ -13,6 +14,7 @@ func newRunCmd() *cobra.Command {
 		addr        string
 		profile     string
 		forceStatus int
+		slow        time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -27,6 +29,7 @@ func newRunCmd() *cobra.Command {
 				Addr:        addr,
 				Profile:     profile,
 				ForceStatus: forceStatus,
+				Slow:        slow,
 			})
 			if err != nil {
 				return err
@@ -40,5 +43,7 @@ func newRunCmd() *cobra.Command {
 		"runtime profile ("+strings.Join(scenario.Available(), ", ")+")")
 	cmd.Flags().IntVar(&forceStatus, "force-status", 0,
 		"force this HTTP status on endpoints that document it; others follow the profile (0 = off)")
+	cmd.Flags().DurationVar(&slow, "slow", 0,
+		"add this latency to every response, e.g. 2s (0 = off)")
 	return cmd
 }

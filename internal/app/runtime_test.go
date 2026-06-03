@@ -4,7 +4,21 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+const pingSpec = `
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      responses:
+        '200':
+          description: ok
+`
 
 func writeSpec(t *testing.T, body string) string {
 	t.Helper()
@@ -82,20 +96,20 @@ func TestNew_ForceStatus_Invalid(t *testing.T) {
 }
 
 func TestNew_UnknownProfile(t *testing.T) {
-	const spec = `
-openapi: 3.0.3
-info:
-  title: T
-  version: 1.0.0
-paths:
-  /ping:
-    get:
-      responses:
-        '200':
-          description: ok
-`
-	_, err := New(Options{SpecPath: writeSpec(t, spec), Profile: "bogus"})
+	_, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "bogus"})
 	if err == nil {
 		t.Fatal("New(unknown profile) expected error, got nil")
+	}
+}
+
+func TestNew_Slow_Valid(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Slow: 2 * time.Second}); err != nil {
+		t.Fatalf("New(slow 2s) error = %v", err)
+	}
+}
+
+func TestNew_Slow_Negative(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Slow: -1}); err == nil {
+		t.Fatal("New(slow -1) expected error, got nil")
 	}
 }

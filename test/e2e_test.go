@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Claudio712005/mock-smith/internal/domain"
+	"github.com/Claudio712005/mock-smith/internal/interceptor"
 	"github.com/Claudio712005/mock-smith/internal/openapi"
 	"github.com/Claudio712005/mock-smith/internal/scenario"
 	httptransport "github.com/Claudio712005/mock-smith/internal/transport/http"
@@ -31,7 +33,7 @@ func loadEndpoints(t *testing.T) []domain.Endpoint {
 
 func startServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptransport.New(":0", loadEndpoints(t), nil)
+	srv := httptransport.New(":0", loadEndpoints(t), nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -39,7 +41,7 @@ func startServer(t *testing.T) *httptest.Server {
 
 func startServerScenario(t *testing.T, scen scenario.Scenario) *httptest.Server {
 	t.Helper()
-	srv := httptransport.New(":0", loadEndpoints(t), scen)
+	srv := httptransport.New(":0", loadEndpoints(t), scen, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -227,6 +229,23 @@ func TestE2E_ForceStatus_OnlyMappedEndpoints(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("/pets status = %d, want 200 (503 not mapped → happy)", resp2.StatusCode)
+	}
+}
+
+func TestE2E_SlowLatency_DelaysResponse(t *testing.T) {
+	chain := interceptor.Chain{interceptor.LatencyInterceptor{Delay: 40 * time.Millisecond}}
+	srv := httptransport.New(":0", loadEndpoints(t), nil, chain)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	start := time.Now()
+	resp := getJSON(t, ts, "/pets", nil)
+	resp.Body.Close()
+	if elapsed := time.Since(start); elapsed < 40*time.Millisecond {
+		t.Fatalf("responded in %v, want >= 40ms (--slow latency)", elapsed)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }
 

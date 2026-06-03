@@ -34,7 +34,7 @@ func sampleEndpoints() []domain.Endpoint {
 }
 
 func TestAdmin_ListEndpoints(t *testing.T) {
-	srv := New(":0", sampleEndpoints(), nil)
+	srv := New(":0", sampleEndpoints(), nil, nil)
 	resp := do(t, srv, "GET", adminPrefix+"/endpoints")
 	defer resp.Body.Close()
 
@@ -61,7 +61,7 @@ func TestAdmin_ListEndpoints(t *testing.T) {
 }
 
 func TestAdmin_GetEndpoint_Found(t *testing.T) {
-	srv := New(":0", sampleEndpoints(), nil)
+	srv := New(":0", sampleEndpoints(), nil, nil)
 	resp := do(t, srv, "GET", adminPrefix+"/endpoint?method=get&path=/pets")
 	defer resp.Body.Close()
 
@@ -84,7 +84,7 @@ func TestAdmin_GetEndpoint_Found(t *testing.T) {
 }
 
 func TestAdmin_GetEndpoint_MissingParams(t *testing.T) {
-	srv := New(":0", sampleEndpoints(), nil)
+	srv := New(":0", sampleEndpoints(), nil, nil)
 	resp := do(t, srv, "GET", adminPrefix+"/endpoint?method=get")
 	defer resp.Body.Close()
 
@@ -94,7 +94,7 @@ func TestAdmin_GetEndpoint_MissingParams(t *testing.T) {
 }
 
 func TestAdmin_GetEndpoint_NotFound(t *testing.T) {
-	srv := New(":0", sampleEndpoints(), nil)
+	srv := New(":0", sampleEndpoints(), nil, nil)
 	resp := do(t, srv, "GET", adminPrefix+"/endpoint?method=get&path=/nope")
 	defer resp.Body.Close()
 
@@ -104,7 +104,7 @@ func TestAdmin_GetEndpoint_NotFound(t *testing.T) {
 }
 
 func TestAdmin_GetEndpoint_MethodCaseInsensitive(t *testing.T) {
-	srv := New(":0", sampleEndpoints(), nil)
+	srv := New(":0", sampleEndpoints(), nil, nil)
 	resp := do(t, srv, "GET", adminPrefix+"/endpoint?method=delete&path=/pets/{id}")
 	defer resp.Body.Close()
 

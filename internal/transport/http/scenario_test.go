@@ -28,7 +28,7 @@ func endpointWithErrors() domain.Endpoint {
 }
 
 func serveWith(ep domain.Endpoint, res scenario.Result) *http.Response {
-	srv := New(":0", []domain.Endpoint{ep}, scenario.Always(res))
+	srv := New(":0", []domain.Endpoint{ep}, scenario.Always(res), nil)
 	req := httptest.NewRequest(ep.Method, ep.Path, nil)
 	rec := httptest.NewRecorder()
 	srv.router.ServeHTTP(rec, req)
@@ -114,7 +114,7 @@ func TestScenario_Timeout_RespondsAfterDelay(t *testing.T) {
 
 func TestScenario_Disconnect_RealServerClosesConn(t *testing.T) {
 	ep := domain.Endpoint{Method: "GET", Path: "/x", SuccessResponse: objectSpec(200)}
-	srv := New(":0", []domain.Endpoint{ep}, scenario.Always(scenario.Result{Kind: scenario.KindDisconnect}))
+	srv := New(":0", []domain.Endpoint{ep}, scenario.Always(scenario.Result{Kind: scenario.KindDisconnect}), nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

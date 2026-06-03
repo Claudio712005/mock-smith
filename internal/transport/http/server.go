@@ -8,6 +8,7 @@ import (
 
 	"github.com/Claudio712005/mock-smith/internal/domain"
 	"github.com/Claudio712005/mock-smith/internal/faker"
+	"github.com/Claudio712005/mock-smith/internal/interceptor"
 	"github.com/Claudio712005/mock-smith/internal/scenario"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -24,8 +25,9 @@ var defaultScenario = scenario.Always(scenario.Result{Kind: scenario.KindSuccess
 // New cria um Server no endereço addr (ex.: ":8080"), registrando uma rota por
 // endpoint. Os templates OpenAPI ("/users/{id}") já casam com a sintaxe do chi.
 // O scenario decide o comportamento de cada requisição; nil equivale a happy
-// (sempre sucesso). Não inicia o servidor; use ListenAndServe.
-func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario) *Server {
+// (sempre sucesso). A chain de interceptors é aplicada antes da escrita da
+// resposta. Não inicia o servidor; use ListenAndServe.
+func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario, chain interceptor.Chain) *Server {
 	if scen == nil {
 		scen = defaultScenario
 	}
@@ -38,7 +40,7 @@ func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario) *Serv
 	registerAdmin(r, endpoints)
 
 	for _, ep := range endpoints {
-		r.MethodFunc(ep.Method, ep.Path, makeHandler(ep, scen))
+		r.MethodFunc(ep.Method, ep.Path, makeHandler(ep, scen, chain))
 	}
 
 	return &Server{addr: addr, router: r}
@@ -56,13 +58,20 @@ func (s *Server) ListenAndServe() error {
 	return http.ListenAndServe(s.addr, s.router)
 }
 
-func makeHandler(ep domain.Endpoint, scen scenario.Scenario) http.HandlerFunc {
+func makeHandler(ep domain.Endpoint, scen scenario.Scenario, chain interceptor.Chain) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		res := scen.Resolve(&scenario.RequestContext{
 			Method:   ep.Method,
 			Path:     ep.Path,
 			Endpoint: ep,
 		})
+
+		if len(chain) > 0 {
+			ictx := &interceptor.Context{Request: req, Endpoint: ep, Result: &res}
+			if err := chain.Apply(ictx); err != nil {
+				return
+			}
+		}
 
 		switch res.Kind {
 		case scenario.KindBusinessError:

@@ -2,8 +2,10 @@ package app
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/Claudio712005/mock-smith/internal/domain"
+	"github.com/Claudio712005/mock-smith/internal/interceptor"
 	"github.com/Claudio712005/mock-smith/internal/openapi"
 	"github.com/Claudio712005/mock-smith/internal/scenario"
 	httptransport "github.com/Claudio712005/mock-smith/internal/transport/http"
@@ -16,6 +18,7 @@ type Options struct {
 	Addr        string
 	Profile     string
 	ForceStatus int
+	Slow        time.Duration
 }
 
 // Runtime guarda os endpoints carregados e os serve via HTTP.
@@ -23,6 +26,7 @@ type Runtime struct {
 	opts      Options
 	endpoints []domain.Endpoint
 	scenario  scenario.Scenario
+	chain     interceptor.Chain
 }
 
 // New carrega e valida a spec, descobre os endpoints, resolve o profile e
@@ -50,16 +54,28 @@ func New(opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("no endpoints found in %q", opts.SpecPath)
 	}
 
-	return &Runtime{opts: opts, endpoints: endpoints, scenario: scen}, nil
+	if opts.Slow < 0 {
+		return nil, fmt.Errorf("invalid --slow %s (must be >= 0)", opts.Slow)
+	}
+
+	var chain interceptor.Chain
+	if opts.Slow > 0 {
+		chain = append(chain, interceptor.LatencyInterceptor{Delay: opts.Slow})
+	}
+
+	return &Runtime{opts: opts, endpoints: endpoints, scenario: scen, chain: chain}, nil
 }
 
 // Run inicia o servidor HTTP e bloqueia até ele parar.
 func (r *Runtime) Run() error {
-	srv := httptransport.New(r.opts.Addr, r.endpoints, r.scenario)
+	srv := httptransport.New(r.opts.Addr, r.endpoints, r.scenario, r.chain)
 
 	fmt.Printf("MockSmith running on %s\n", r.opts.Addr)
 	fmt.Printf("Loaded %d endpoints\n", len(r.endpoints))
 	fmt.Printf("Profile: %s\n", r.opts.Profile)
+	if r.opts.Slow > 0 {
+		fmt.Printf("Adding %s latency to every response\n", r.opts.Slow)
+	}
 	if r.opts.ForceStatus != 0 {
 		fmt.Printf("Forcing status %d on endpoints that document it\n", r.opts.ForceStatus)
 	}

@@ -19,10 +19,11 @@ Loaded 23 endpoints
 Profile: happy
 ```
 
-> Status: **Fase 2**. Carrega a spec, descobre os endpoints e serve respostas
+> Status: **Fase 3**. Carrega a spec, descobre os endpoints e serve respostas
 > guiadas por um **profile de runtime** (`happy`, `sad`, `resilience`, `chaos`) —
 > sucesso, erro de negócio, erro de servidor, timeout, corpo malformado e
-> desconexão. Interceptors e flags por endpoint estão no roadmap abaixo.
+> desconexão. Um **pipeline de interceptors** compõe comportamentos sobre o
+> profile (ex.: `--slow` adiciona latência). Flags por endpoint no roadmap abaixo.
 
 ---
 
@@ -101,6 +102,40 @@ Detalhes:
   sucesso (ex.: `201`) só devolve a resposta de sucesso.
 - Erro forçado usa o corpo do erro documentado daquele status.
 - `0` (padrão) desliga. Valores fora de `100–599` são rejeitados na inicialização.
+
+---
+
+## Interceptors
+
+Além do profile, o MockSmith aplica um **pipeline de interceptors**
+(Chain of Responsibility) a cada requisição, **antes** de escrever a resposta.
+Cada interceptor pode introduzir efeitos (ex.: atraso) e/ou sobrescrever o
+comportamento sorteado pelo profile. Compõem-se em ordem, sem acoplar o servidor
+a cada um.
+
+Interceptors disponíveis no engine:
+
+| Interceptor             | Efeito                                                       |
+|-------------------------|--------------------------------------------------------------|
+| `LatencyInterceptor`    | Atrasa toda resposta por uma duração fixa.                   |
+| `FailureInterceptor`    | Sobrescreve com erro de servidor numa fração das requisições.|
+| `TimeoutInterceptor`    | Sobrescreve com timeout (504) numa fração das requisições.   |
+| `CorruptionInterceptor` | Sobrescreve com corpo malformado numa fração das requisições.|
+
+### Latência (`--slow`)
+
+`--slow <duração>` injeta o `LatencyInterceptor`, somando a latência a **toda**
+resposta. Aceita qualquer duração Go (`500ms`, `2s`, `1m`). `0` (padrão) desliga;
+valores negativos são rejeitados. Respeita o cancelamento do cliente: se a
+conexão cair durante a espera, a requisição é abortada.
+
+```bash
+mocksmith run examples/petstore.yaml --slow 2s
+mocksmith run examples/petstore.yaml --profile resilience --slow 500ms
+```
+
+> Os demais interceptors (`failure`, `timeout`, `corrupt`) ganham flags por
+> endpoint na Fase 4 — ver [PLAN.md](PLAN.md).
 
 ---
 
@@ -278,6 +313,7 @@ Sobe um servidor de mock a partir de uma spec OpenAPI.
 | `--addr`       | `:8080`   | Endereço em que o servidor escuta.              |
 | `--profile`    | `happy`   | Profile de runtime: `happy`, `sad`, `resilience`, `chaos` (ver [Profiles](#profiles)). |
 | `--force-status` | `0`     | Força esse status nos endpoints que o documentam; os demais seguem o profile (`0` = off). Ver [Forçar um status](#forçar-um-status---force-status). |
+| `--slow`       | `0`       | Adiciona latência a toda resposta, ex.: `2s` (`0` = off). Ver [Interceptors](#interceptors). |
 | `-h`, `--help` | —         | Ajuda do comando.                               |
 
 ### Global
@@ -327,6 +363,7 @@ internal/
   app/                wiring do runtime (carga → descoberta → serve)
   openapi/            carga da spec + descoberta de endpoints
   scenario/           engine de profiles (sorteio de comportamento por peso)
+  interceptor/        pipeline de comportamento (latência, falha, timeout, corrupção)
   transport/http/     servidor chi e handlers das requisições
   domain/             modelos Endpoint / ResponseSpec
   faker/              geração de dado falso a partir do schema

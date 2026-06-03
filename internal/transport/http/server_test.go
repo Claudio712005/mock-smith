@@ -30,7 +30,7 @@ func do(t *testing.T, srv *Server, method, target string) *http.Response {
 }
 
 func TestServer_Addr(t *testing.T) {
-	srv := New(":9999", nil, nil)
+	srv := New(":9999", nil, nil, nil)
 	if srv.Addr() != ":9999" {
 		t.Fatalf("Addr() = %q, want :9999", srv.Addr())
 	}
@@ -38,7 +38,7 @@ func TestServer_Addr(t *testing.T) {
 
 func TestHandler_GeneratesBody(t *testing.T) {
 	ep := domain.Endpoint{Method: "GET", Path: "/things", SuccessResponse: objectSpec(200)}
-	srv := New(":0", []domain.Endpoint{ep}, nil)
+	srv := New(":0", []domain.Endpoint{ep}, nil, nil)
 
 	resp := do(t, srv, "GET", "/things")
 	defer resp.Body.Close()
@@ -62,7 +62,7 @@ func TestHandler_UsesExample(t *testing.T) {
 	spec := objectSpec(200)
 	spec.Example = map[string]any{"name": "fixed"}
 	ep := domain.Endpoint{Method: "GET", Path: "/ex", SuccessResponse: spec}
-	srv := New(":0", []domain.Endpoint{ep}, nil)
+	srv := New(":0", []domain.Endpoint{ep}, nil, nil)
 
 	resp := do(t, srv, "GET", "/ex")
 	defer resp.Body.Close()
@@ -78,7 +78,7 @@ func TestHandler_UsesExample(t *testing.T) {
 
 func TestHandler_NoSuccessResponse(t *testing.T) {
 	ep := domain.Endpoint{Method: "DELETE", Path: "/gone"}
-	srv := New(":0", []domain.Endpoint{ep}, nil)
+	srv := New(":0", []domain.Endpoint{ep}, nil, nil)
 
 	resp := do(t, srv, "DELETE", "/gone")
 	defer resp.Body.Close()
@@ -98,7 +98,7 @@ func TestHandler_SuccessWithoutBody(t *testing.T) {
 		Path:            "/items/{id}",
 		SuccessResponse: &domain.ResponseSpec{StatusCode: 204},
 	}
-	srv := New(":0", []domain.Endpoint{ep}, nil)
+	srv := New(":0", []domain.Endpoint{ep}, nil, nil)
 
 	resp := do(t, srv, "DELETE", "/items/42")
 	defer resp.Body.Close()
@@ -114,7 +114,7 @@ func TestHandler_SuccessWithoutBody(t *testing.T) {
 
 func TestHandler_PathParamRoutes(t *testing.T) {
 	ep := domain.Endpoint{Method: "GET", Path: "/users/{id}", SuccessResponse: objectSpec(200)}
-	srv := New(":0", []domain.Endpoint{ep}, nil)
+	srv := New(":0", []domain.Endpoint{ep}, nil, nil)
 
 	resp := do(t, srv, "GET", "/users/abc123")
 	defer resp.Body.Close()
