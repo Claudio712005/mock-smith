@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Built mocksmith binary (go build -o mocksmith ./cmd/mocksmith)
+/mocksmith
+
 # Test binary, built with `go test -c`
 *.test
 
