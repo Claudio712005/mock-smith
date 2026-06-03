@@ -55,7 +55,6 @@ func TestAdmin_ListEndpoints(t *testing.T) {
 	if first.Method != "GET" || first.Path != "/pets" || first.OperationID != "listPets" {
 		t.Errorf("summary wrong: %+v", first)
 	}
-	// statuses: success 200 + error 500
 	if len(first.Statuses) != 2 || first.Statuses[0] != 200 || first.Statuses[1] != 500 {
 		t.Errorf("statuses = %v, want [200 500]", first.Statuses)
 	}
@@ -106,7 +105,6 @@ func TestAdmin_GetEndpoint_NotFound(t *testing.T) {
 
 func TestAdmin_GetEndpoint_MethodCaseInsensitive(t *testing.T) {
 	srv := New(":0", sampleEndpoints(), nil)
-	// lower-case method in query must match stored upper-case method.
 	resp := do(t, srv, "GET", adminPrefix+"/endpoint?method=delete&path=/pets/{id}")
 	defer resp.Body.Close()
 

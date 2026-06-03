@@ -23,7 +23,6 @@ func TestGenerate_NilAndEmpty(t *testing.T) {
 	if got := Generate(&openapi3.SchemaRef{}); got != nil {
 		t.Fatalf("Generate(empty ref) = %v, want nil", got)
 	}
-	// schema with unsupported/absent type returns nil
 	if got := Generate(openapi3.NewSchema().NewRef()); got != nil {
 		t.Fatalf("Generate(no type) = %v, want nil", got)
 	}
@@ -150,7 +149,6 @@ func TestGenerate_StringBoundedLength(t *testing.T) {
 }
 
 func TestGenerate_StringMaxBelowDefaultMin(t *testing.T) {
-	// MaxLength below the internal default of 8 should cap the length.
 	s := openapi3.NewStringSchema()
 	max := uint64(3)
 	s.MaxLength = &max
@@ -239,7 +237,6 @@ func TestGenerate_Object(t *testing.T) {
 }
 
 func TestGenerate_ObjectByPropertiesNoType(t *testing.T) {
-	// No explicit type but has properties → treated as object.
 	s := openapi3.NewSchema()
 	s.WithProperty("x", openapi3.NewStringSchema())
 	got, ok := Generate(s.NewRef()).(map[string]any)
@@ -315,7 +312,6 @@ func TestGenerate_AnyOf(t *testing.T) {
 }
 
 func TestGenerate_DepthGuard(t *testing.T) {
-	// Self-referential object must not recurse forever; it terminates at maxDepth.
 	s := openapi3.NewObjectSchema()
 	ref := s.NewRef()
 	s.WithPropertyRef("self", ref)

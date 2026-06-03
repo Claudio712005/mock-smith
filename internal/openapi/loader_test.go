@@ -54,7 +54,6 @@ func TestLoad_InvalidYAML(t *testing.T) {
 }
 
 func TestLoad_InvalidSpec(t *testing.T) {
-	// Well-formed YAML but invalid OpenAPI (missing info.version, no paths).
 	const badSpec = `
 openapi: 3.0.3
 info:
@@ -66,7 +65,6 @@ info:
 }
 
 func TestLoad_ExampleSpec(t *testing.T) {
-	// Sanity check the bundled example loads and validates.
 	doc, err := Load(filepath.Join("..", "..", "examples", "petstore.yaml"))
 	if err != nil {
 		t.Fatalf("Load(petstore) error = %v", err)

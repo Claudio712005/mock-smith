@@ -74,6 +74,34 @@ mocksmith run examples/petstore.yaml --profile sad
 mocksmith run examples/petstore.yaml --profile chaos
 ```
 
+### Forçar um status (`--force-status`)
+
+`--force-status <code>` força um status HTTP **apenas nos endpoints que o
+documentam** na spec (como sucesso ou erro). Endpoints que **não** mapeiam aquele
+status ignoram a flag e seguem o `--profile` normalmente.
+
+Combina com qualquer profile. Exemplo — profile `happy` + `--force-status 500`:
+todo endpoint com `500` mapeado responde `500`; os demais continuam no happy.
+
+```bash
+mocksmith run examples/petstore.yaml --profile happy --force-status 503
+```
+
+Com a [spec de exemplo](examples/petstore.yaml):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:8080/payments  # 503 (mapeado → forçado)
+curl -s -o /dev/null -w "%{http_code}\n"      localhost:8080/pets         # 200 (sem 503 → happy)
+curl -s -o /dev/null -w "%{http_code}\n"      localhost:8080/pets/1       # 200 (só tem 404 → happy)
+```
+
+Detalhes:
+
+- Vale para qualquer status documentado, não só erros — forçar o status de
+  sucesso (ex.: `201`) só devolve a resposta de sucesso.
+- Erro forçado usa o corpo do erro documentado daquele status.
+- `0` (padrão) desliga. Valores fora de `100–599` são rejeitados na inicialização.
+
 ---
 
 ## Requisitos
@@ -148,6 +176,9 @@ mocksmith run examples/petstore.yaml --addr :9090
 
 # profile de runtime (happy, sad, resilience, chaos)
 mocksmith run examples/petstore.yaml --profile chaos
+
+# forçar 503 nos endpoints que o mapeiam; o resto segue o profile
+mocksmith run examples/petstore.yaml --force-status 503
 ```
 
 Chame de outro terminal:
@@ -246,6 +277,7 @@ Sobe um servidor de mock a partir de uma spec OpenAPI.
 |----------------|-----------|-------------------------------------------------|
 | `--addr`       | `:8080`   | Endereço em que o servidor escuta.              |
 | `--profile`    | `happy`   | Profile de runtime: `happy`, `sad`, `resilience`, `chaos` (ver [Profiles](#profiles)). |
+| `--force-status` | `0`     | Força esse status nos endpoints que o documentam; os demais seguem o profile (`0` = off). Ver [Forçar um status](#forçar-um-status---force-status). |
 | `-h`, `--help` | —         | Ajuda do comando.                               |
 
 ### Global

@@ -10,11 +10,12 @@ import (
 )
 
 // Options reúne as configurações de um Runtime: caminho da spec, endereço de
-// escuta e profile de execução (no MVP, apenas "happy").
+// escuta, profile de execução e um status forçado opcional.
 type Options struct {
-	SpecPath string
-	Addr     string
-	Profile  string
+	SpecPath    string
+	Addr        string
+	Profile     string
+	ForceStatus int
 }
 
 // Runtime guarda os endpoints carregados e os serve via HTTP.
@@ -31,6 +32,12 @@ func New(opts Options) (*Runtime, error) {
 	scen, err := scenario.ForProfile(opts.Profile)
 	if err != nil {
 		return nil, err
+	}
+	if opts.ForceStatus != 0 {
+		if opts.ForceStatus < 100 || opts.ForceStatus > 599 {
+			return nil, fmt.Errorf("invalid --force-status %d (must be a valid HTTP status, 100-599)", opts.ForceStatus)
+		}
+		scen = scenario.ForceStatus(opts.ForceStatus, scen)
 	}
 
 	doc, err := openapi.Load(opts.SpecPath)
@@ -53,6 +60,9 @@ func (r *Runtime) Run() error {
 	fmt.Printf("MockSmith running on %s\n", r.opts.Addr)
 	fmt.Printf("Loaded %d endpoints\n", len(r.endpoints))
 	fmt.Printf("Profile: %s\n", r.opts.Profile)
+	if r.opts.ForceStatus != 0 {
+		fmt.Printf("Forcing status %d on endpoints that document it\n", r.opts.ForceStatus)
+	}
 
 	return srv.ListenAndServe()
 }

@@ -81,7 +81,6 @@ paths:
 
 func TestDiscover_SortedStable(t *testing.T) {
 	eps := Discover(loadDoc(t, multiSpec))
-	// Order: path asc, then method asc → /a GET, /b GET, /b POST.
 	want := []struct{ method, path string }{
 		{"GET", "/a"},
 		{"GET", "/b"},
@@ -127,7 +126,6 @@ func TestDiscover_MetadataAndErrors(t *testing.T) {
 			if ep.SuccessResponse.ContentType != "application/json" {
 				t.Errorf("content type = %q", ep.SuccessResponse.ContentType)
 			}
-			// Errors sorted ascending: 404, 500.
 			if len(ep.ErrorResponses) != 2 {
 				t.Fatalf("got %d errors, want 2", len(ep.ErrorResponses))
 			}

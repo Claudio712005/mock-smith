@@ -31,8 +31,8 @@ const (
 // Result descreve a decisão do scenario para uma requisição.
 type Result struct {
 	Kind   Kind
-	Status int           // usado por KindServerError
-	Delay  time.Duration // usado por KindTimeout
+	Status int
+	Delay  time.Duration
 }
 
 // RequestContext carrega o que o scenario pode inspecionar para decidir. No MVP

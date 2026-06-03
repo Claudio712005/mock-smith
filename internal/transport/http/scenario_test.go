@@ -118,7 +118,6 @@ func TestScenario_Disconnect_RealServerClosesConn(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	// Real listener supports Hijacker → client sees a broken connection (no response).
 	_, err := ts.Client().Get(ts.URL + "/x")
 	if err == nil {
 		t.Fatal("expected connection error on disconnect, got nil")
@@ -126,7 +125,6 @@ func TestScenario_Disconnect_RealServerClosesConn(t *testing.T) {
 }
 
 func TestScenario_Disconnect_RecorderFallback500(t *testing.T) {
-	// httptest.ResponseRecorder is not a Hijacker → handler falls back to 500.
 	ep := domain.Endpoint{Method: "GET", Path: "/x", SuccessResponse: objectSpec(200)}
 	resp := serveWith(ep, scenario.Result{Kind: scenario.KindDisconnect})
 	defer resp.Body.Close()

@@ -41,7 +41,6 @@ func TestHappy_AlwaysSuccess(t *testing.T) {
 	}
 }
 
-// withRand clones a profile with a deterministic rand() for boundary testing.
 func withRand(src *Profile, r float64) *Profile {
 	return &Profile{
 		name:    src.name,
@@ -52,14 +51,14 @@ func withRand(src *Profile, r float64) *Profile {
 }
 
 func TestProfile_WeightedBoundaries_Sad(t *testing.T) {
-	src := profiles["sad"] // 0.70 success, 0.30 business error
+	src := profiles["sad"]
 	tests := []struct {
 		r    float64
 		kind Kind
 	}{
 		{0.0, KindSuccess},
 		{0.69, KindSuccess},
-		{0.70, KindBusinessError}, // exactly at the success boundary tips over
+		{0.70, KindBusinessError},
 		{0.99, KindBusinessError},
 	}
 	for _, tc := range tests {
@@ -71,12 +70,10 @@ func TestProfile_WeightedBoundaries_Sad(t *testing.T) {
 }
 
 func TestProfile_Resilience_Distribution(t *testing.T) {
-	src := profiles["resilience"] // 0.90 success, 0.05 timeout, 0.05 503
-	// success region
+	src := profiles["resilience"]
 	if got := withRand(src, 0.5).Resolve(nil); got.Kind != KindSuccess {
 		t.Errorf("rand=0.5 → %v, want success", got.Kind)
 	}
-	// timeout region [0.90, 0.95)
 	got := withRand(src, 0.92).Resolve(nil)
 	if got.Kind != KindTimeout {
 		t.Fatalf("rand=0.92 → %v, want timeout", got.Kind)
@@ -84,7 +81,6 @@ func TestProfile_Resilience_Distribution(t *testing.T) {
 	if got.Delay != defaultTimeout {
 		t.Errorf("timeout delay = %v, want %v", got.Delay, defaultTimeout)
 	}
-	// server-error region [0.95, 1.0)
 	got = withRand(src, 0.97).Resolve(nil)
 	if got.Kind != KindServerError || got.Status != 503 {
 		t.Errorf("rand=0.97 → %+v, want 503 server error", got)
@@ -92,7 +88,7 @@ func TestProfile_Resilience_Distribution(t *testing.T) {
 }
 
 func TestProfile_Chaos_AllKindsReachable(t *testing.T) {
-	src := profiles["chaos"] // 0.80 ok, .05 malformed, .05 timeout, .05 disconnect, .05 500
+	src := profiles["chaos"]
 	cases := []struct {
 		r    float64
 		kind Kind
@@ -112,7 +108,6 @@ func TestProfile_Chaos_AllKindsReachable(t *testing.T) {
 
 func TestProfile_RandAtUpperBoundFallsToLast(t *testing.T) {
 	src := profiles["sad"]
-	// rand()*total == total (r=1.0) must not panic and returns the last entry.
 	if got := withRand(src, 1.0).Resolve(nil); got.Kind != KindBusinessError {
 		t.Fatalf("rand=1.0 → %v, want last entry (business error)", got.Kind)
 	}

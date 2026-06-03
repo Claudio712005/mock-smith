@@ -7,11 +7,8 @@ import (
 	"time"
 )
 
-// defaultTimeout é quanto um KindTimeout dorme antes de devolver 504, simulando
-// um serviço que travou até o cliente desistir.
 const defaultTimeout = 30 * time.Second
 
-// weighted associa um peso relativo a um Result dentro de um Profile.
 type weighted struct {
 	weight float64
 	result Result
@@ -53,7 +50,6 @@ func newProfile(name string, entries []weighted) *Profile {
 	return &Profile{name: name, entries: entries, total: total, rand: rand.Float64}
 }
 
-// profiles é o registro dos profiles embutidos.
 var profiles = map[string]*Profile{
 	"happy": newProfile("happy", []weighted{
 		{1.0, Result{Kind: KindSuccess}},

@@ -19,7 +19,6 @@ type Server struct {
 	router chi.Router
 }
 
-// defaultScenario é usado quando New recebe scen nil: sempre sucesso.
 var defaultScenario = scenario.Always(scenario.Result{Kind: scenario.KindSuccess})
 
 // New cria um Server no endereço addr (ex.: ":8080"), registrando uma rota por
@@ -82,7 +81,6 @@ func makeHandler(ep domain.Endpoint, scen scenario.Scenario) http.HandlerFunc {
 	}
 }
 
-// writeSuccess devolve a resposta de sucesso documentada do endpoint.
 func writeSuccess(w http.ResponseWriter, ep domain.Endpoint) {
 	spec := ep.SuccessResponse
 	if spec == nil {
@@ -92,8 +90,6 @@ func writeSuccess(w http.ResponseWriter, ep domain.Endpoint) {
 	writeSpec(w, ep, *spec)
 }
 
-// writeBusinessError devolve o menor erro 4xx documentado; sem nenhum, sintetiza
-// um 400 genérico.
 func writeBusinessError(w http.ResponseWriter, ep domain.Endpoint) {
 	for _, e := range ep.ErrorResponses {
 		if e.StatusCode >= 400 && e.StatusCode < 500 {
@@ -104,8 +100,6 @@ func writeBusinessError(w http.ResponseWriter, ep domain.Endpoint) {
 	writeGenericError(w, http.StatusBadRequest)
 }
 
-// writeServerError devolve o erro documentado com o status pedido, ou um corpo
-// genérico com aquele status.
 func writeServerError(w http.ResponseWriter, ep domain.Endpoint, status int) {
 	if status == 0 {
 		status = http.StatusInternalServerError
@@ -119,26 +113,20 @@ func writeServerError(w http.ResponseWriter, ep domain.Endpoint, status int) {
 	writeGenericError(w, status)
 }
 
-// writeTimeout dorme por delay (respeitando o cancelamento do cliente) e então
-// responde 504, simulando um serviço travado.
 func writeTimeout(w http.ResponseWriter, req *http.Request, delay time.Duration) {
 	select {
 	case <-time.After(delay):
 		writeGenericError(w, http.StatusGatewayTimeout)
 	case <-req.Context().Done():
-		// cliente desistiu antes; nada a escrever.
 	}
 }
 
-// writeMalformed responde 200 com JSON propositalmente inválido.
 func writeMalformed(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"id": 1, "name": `)) // truncado de propósito
+	_, _ = w.Write([]byte(`{"id": 1, "name": `))
 }
 
-// disconnect derruba a conexão sem responder. Sem suporte a Hijacker, cai num
-// 500 como melhor aproximação.
 func disconnect(w http.ResponseWriter, ep domain.Endpoint) {
 	hj, ok := w.(http.Hijacker)
 	if !ok {
@@ -153,7 +141,6 @@ func disconnect(w http.ResponseWriter, ep domain.Endpoint) {
 	_ = conn.Close()
 }
 
-// writeSpec serializa uma ResponseSpec (sucesso ou erro) na resposta.
 func writeSpec(w http.ResponseWriter, ep domain.Endpoint, spec domain.ResponseSpec) {
 	if !spec.HasBody() {
 		w.WriteHeader(spec.StatusCode)
@@ -174,8 +161,6 @@ func writeSpec(w http.ResponseWriter, ep domain.Endpoint, spec domain.ResponseSp
 	}
 }
 
-// writeGenericError escreve um corpo JSON simples para um status sem resposta
-// documentada.
 func writeGenericError(w http.ResponseWriter, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

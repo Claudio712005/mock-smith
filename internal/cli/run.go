@@ -10,8 +10,9 @@ import (
 
 func newRunCmd() *cobra.Command {
 	var (
-		addr    string
-		profile string
+		addr        string
+		profile     string
+		forceStatus int
 	)
 
 	cmd := &cobra.Command{
@@ -22,9 +23,10 @@ func newRunCmd() *cobra.Command {
 			"  mocksmith run openapi.yaml --addr :9090",
 		RunE: func(_ *cobra.Command, args []string) error {
 			rt, err := app.New(app.Options{
-				SpecPath: args[0],
-				Addr:     addr,
-				Profile:  profile,
+				SpecPath:    args[0],
+				Addr:        addr,
+				Profile:     profile,
+				ForceStatus: forceStatus,
 			})
 			if err != nil {
 				return err
@@ -36,5 +38,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&addr, "addr", ":8080", "address the mock server listens on")
 	cmd.Flags().StringVar(&profile, "profile", "happy",
 		"runtime profile ("+strings.Join(scenario.Available(), ", ")+")")
+	cmd.Flags().IntVar(&forceStatus, "force-status", 0,
+		"force this HTTP status on endpoints that document it; others follow the profile (0 = off)")
 	return cmd
 }

@@ -10,24 +10,36 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Claudio712005/mock-smith/internal/domain"
 	"github.com/Claudio712005/mock-smith/internal/openapi"
+	"github.com/Claudio712005/mock-smith/internal/scenario"
 	httptransport "github.com/Claudio712005/mock-smith/internal/transport/http"
 )
 
-func startServer(t *testing.T) *httptest.Server {
+func loadEndpoints(t *testing.T) []domain.Endpoint {
 	t.Helper()
-	specPath := filepath.Join("..", "examples", "petstore.yaml")
-
-	doc, err := openapi.Load(specPath)
+	doc, err := openapi.Load(filepath.Join("..", "examples", "petstore.yaml"))
 	if err != nil {
 		t.Fatalf("load spec: %v", err)
 	}
-	endpoints := openapi.Discover(doc)
-	if len(endpoints) == 0 {
+	eps := openapi.Discover(doc)
+	if len(eps) == 0 {
 		t.Fatal("no endpoints discovered")
 	}
+	return eps
+}
 
-	srv := httptransport.New(":0", endpoints, nil)
+func startServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptransport.New(":0", loadEndpoints(t), nil)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func startServerScenario(t *testing.T, scen scenario.Scenario) *httptest.Server {
+	t.Helper()
+	srv := httptransport.New(":0", loadEndpoints(t), scen)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -57,22 +69,18 @@ func TestE2E_ListPets_GeneratesArray(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	// schema declares minItems: 3
 	if len(pets) < 3 {
 		t.Fatalf("got %d pets, want >= 3 (minItems)", len(pets))
 	}
 	first := pets[0]
-	// required fields present
 	for _, k := range []string{"id", "name", "status"} {
 		if _, ok := first[k]; !ok {
 			t.Errorf("pet missing required field %q: %v", k, first)
 		}
 	}
-	// enum status → first value "available"
 	if first["status"] != "available" {
 		t.Errorf("status = %v, want available (first enum)", first["status"])
 	}
-	// example on Pet.name
 	if first["name"] != "Rex" {
 		t.Errorf("name = %v, want Rex (schema example)", first["name"])
 	}
@@ -154,7 +162,6 @@ func TestE2E_Admin_ListEndpoints(t *testing.T) {
 	if out.Count == 0 || out.Count != len(out.Endpoints) {
 		t.Fatalf("count mismatch: count=%d len=%d", out.Count, len(out.Endpoints))
 	}
-	// petstore has GET /pets among others
 	found := false
 	for _, e := range out.Endpoints {
 		if e.Method == "GET" && e.Path == "/pets" {
@@ -189,7 +196,6 @@ func TestE2E_Admin_EndpointDetail(t *testing.T) {
 	if d.Success == nil || d.Success.Status != 201 {
 		t.Fatalf("success wrong: %+v", d.Success)
 	}
-	// payments declares a 503 error
 	has503 := false
 	for _, e := range d.Errors {
 		if e.Status == 503 {
@@ -198,6 +204,29 @@ func TestE2E_Admin_EndpointDetail(t *testing.T) {
 	}
 	if !has503 {
 		t.Errorf("expected 503 in errors: %+v", d.Errors)
+	}
+}
+
+func TestE2E_ForceStatus_OnlyMappedEndpoints(t *testing.T) {
+	base, err := scenario.ForProfile("happy")
+	if err != nil {
+		t.Fatalf("profile: %v", err)
+	}
+	ts := startServerScenario(t, scenario.ForceStatus(503, base))
+
+	resp, err := ts.Client().Post(ts.URL+"/payments", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /payments: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 503 {
+		t.Fatalf("/payments status = %d, want 503 (mapped → forced)", resp.StatusCode)
+	}
+
+	resp2 := getJSON(t, ts, "/pets", nil)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("/pets status = %d, want 200 (503 not mapped → happy)", resp2.StatusCode)
 	}
 }
 
