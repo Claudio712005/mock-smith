@@ -38,7 +38,7 @@ paths:
 }
 
 func TestNew_BadSpecPath(t *testing.T) {
-	if _, err := New(Options{SpecPath: "/no/such/file.yaml"}); err == nil {
+	if _, err := New(Options{SpecPath: "/no/such/file.yaml", Profile: "happy"}); err == nil {
 		t.Fatal("New(bad path) expected error, got nil")
 	}
 }
@@ -51,8 +51,27 @@ info:
   version: 1.0.0
 paths: {}
 `
-	_, err := New(Options{SpecPath: writeSpec(t, spec)})
+	_, err := New(Options{SpecPath: writeSpec(t, spec), Profile: "happy"})
 	if err == nil {
 		t.Fatal("New(no endpoints) expected error, got nil")
+	}
+}
+
+func TestNew_UnknownProfile(t *testing.T) {
+	const spec = `
+openapi: 3.0.3
+info:
+  title: T
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      responses:
+        '200':
+          description: ok
+`
+	_, err := New(Options{SpecPath: writeSpec(t, spec), Profile: "bogus"})
+	if err == nil {
+		t.Fatal("New(unknown profile) expected error, got nil")
 	}
 }

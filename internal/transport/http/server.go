@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Claudio712005/mock-smith/internal/domain"
 	"github.com/Claudio712005/mock-smith/internal/faker"
+	"github.com/Claudio712005/mock-smith/internal/scenario"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -17,10 +19,18 @@ type Server struct {
 	router chi.Router
 }
 
+// defaultScenario é usado quando New recebe scen nil: sempre sucesso.
+var defaultScenario = scenario.Always(scenario.Result{Kind: scenario.KindSuccess})
+
 // New cria um Server no endereço addr (ex.: ":8080"), registrando uma rota por
 // endpoint. Os templates OpenAPI ("/users/{id}") já casam com a sintaxe do chi.
-// Não inicia o servidor; use ListenAndServe.
-func New(addr string, endpoints []domain.Endpoint) *Server {
+// O scenario decide o comportamento de cada requisição; nil equivale a happy
+// (sempre sucesso). Não inicia o servidor; use ListenAndServe.
+func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario) *Server {
+	if scen == nil {
+		scen = defaultScenario
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
@@ -29,7 +39,7 @@ func New(addr string, endpoints []domain.Endpoint) *Server {
 	registerAdmin(r, endpoints)
 
 	for _, ep := range endpoints {
-		r.MethodFunc(ep.Method, ep.Path, makeHandler(ep))
+		r.MethodFunc(ep.Method, ep.Path, makeHandler(ep, scen))
 	}
 
 	return &Server{addr: addr, router: r}
@@ -47,30 +57,132 @@ func (s *Server) ListenAndServe() error {
 	return http.ListenAndServe(s.addr, s.router)
 }
 
-func makeHandler(ep domain.Endpoint) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		spec := ep.SuccessResponse
-		if spec == nil {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+func makeHandler(ep domain.Endpoint, scen scenario.Scenario) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		res := scen.Resolve(&scenario.RequestContext{
+			Method:   ep.Method,
+			Path:     ep.Path,
+			Endpoint: ep,
+		})
 
-		if !spec.HasBody() {
-			w.WriteHeader(spec.StatusCode)
-			return
-		}
-
-		body := spec.Example
-		if body == nil {
-			body = faker.Generate(spec.Schema)
-		}
-
-		w.Header().Set("Content-Type", spec.ContentType)
-		w.WriteHeader(spec.StatusCode)
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(body); err != nil {
-			fmt.Printf("mocksmith: encode error for %s %s: %v\n", ep.Method, ep.Path, err)
+		switch res.Kind {
+		case scenario.KindBusinessError:
+			writeBusinessError(w, ep)
+		case scenario.KindServerError:
+			writeServerError(w, ep, res.Status)
+		case scenario.KindTimeout:
+			writeTimeout(w, req, res.Delay)
+		case scenario.KindMalformed:
+			writeMalformed(w)
+		case scenario.KindDisconnect:
+			disconnect(w, ep)
+		default:
+			writeSuccess(w, ep)
 		}
 	}
+}
+
+// writeSuccess devolve a resposta de sucesso documentada do endpoint.
+func writeSuccess(w http.ResponseWriter, ep domain.Endpoint) {
+	spec := ep.SuccessResponse
+	if spec == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeSpec(w, ep, *spec)
+}
+
+// writeBusinessError devolve o menor erro 4xx documentado; sem nenhum, sintetiza
+// um 400 genérico.
+func writeBusinessError(w http.ResponseWriter, ep domain.Endpoint) {
+	for _, e := range ep.ErrorResponses {
+		if e.StatusCode >= 400 && e.StatusCode < 500 {
+			writeSpec(w, ep, e)
+			return
+		}
+	}
+	writeGenericError(w, http.StatusBadRequest)
+}
+
+// writeServerError devolve o erro documentado com o status pedido, ou um corpo
+// genérico com aquele status.
+func writeServerError(w http.ResponseWriter, ep domain.Endpoint, status int) {
+	if status == 0 {
+		status = http.StatusInternalServerError
+	}
+	for _, e := range ep.ErrorResponses {
+		if e.StatusCode == status {
+			writeSpec(w, ep, e)
+			return
+		}
+	}
+	writeGenericError(w, status)
+}
+
+// writeTimeout dorme por delay (respeitando o cancelamento do cliente) e então
+// responde 504, simulando um serviço travado.
+func writeTimeout(w http.ResponseWriter, req *http.Request, delay time.Duration) {
+	select {
+	case <-time.After(delay):
+		writeGenericError(w, http.StatusGatewayTimeout)
+	case <-req.Context().Done():
+		// cliente desistiu antes; nada a escrever.
+	}
+}
+
+// writeMalformed responde 200 com JSON propositalmente inválido.
+func writeMalformed(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"id": 1, "name": `)) // truncado de propósito
+}
+
+// disconnect derruba a conexão sem responder. Sem suporte a Hijacker, cai num
+// 500 como melhor aproximação.
+func disconnect(w http.ResponseWriter, ep domain.Endpoint) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		writeGenericError(w, http.StatusInternalServerError)
+		return
+	}
+	conn, _, err := hj.Hijack()
+	if err != nil {
+		fmt.Printf("mocksmith: hijack error for %s %s: %v\n", ep.Method, ep.Path, err)
+		return
+	}
+	_ = conn.Close()
+}
+
+// writeSpec serializa uma ResponseSpec (sucesso ou erro) na resposta.
+func writeSpec(w http.ResponseWriter, ep domain.Endpoint, spec domain.ResponseSpec) {
+	if !spec.HasBody() {
+		w.WriteHeader(spec.StatusCode)
+		return
+	}
+
+	body := spec.Example
+	if body == nil {
+		body = faker.Generate(spec.Schema)
+	}
+
+	w.Header().Set("Content-Type", spec.ContentType)
+	w.WriteHeader(spec.StatusCode)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(body); err != nil {
+		fmt.Printf("mocksmith: encode error for %s %s: %v\n", ep.Method, ep.Path, err)
+	}
+}
+
+// writeGenericError escreve um corpo JSON simples para um status sem resposta
+// documentada.
+func writeGenericError(w http.ResponseWriter, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(map[string]any{
+		"code":    status,
+		"message": http.StatusText(status),
+	})
 }

@@ -27,7 +27,7 @@ func startServer(t *testing.T) *httptest.Server {
 		t.Fatal("no endpoints discovered")
 	}
 
-	srv := httptransport.New(":0", endpoints)
+	srv := httptransport.New(":0", endpoints, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts

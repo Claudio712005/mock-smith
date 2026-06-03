@@ -5,6 +5,7 @@ import (
 
 	"github.com/Claudio712005/mock-smith/internal/domain"
 	"github.com/Claudio712005/mock-smith/internal/openapi"
+	"github.com/Claudio712005/mock-smith/internal/scenario"
 	httptransport "github.com/Claudio712005/mock-smith/internal/transport/http"
 )
 
@@ -20,12 +21,18 @@ type Options struct {
 type Runtime struct {
 	opts      Options
 	endpoints []domain.Endpoint
+	scenario  scenario.Scenario
 }
 
-// New carrega e valida a spec, descobre os endpoints e devolve um Runtime
-// pronto (sem iniciar o servidor). Retorna erro se a spec for inválida ou não
-// tiver endpoints.
+// New carrega e valida a spec, descobre os endpoints, resolve o profile e
+// devolve um Runtime pronto (sem iniciar o servidor). Retorna erro se a spec for
+// inválida, não tiver endpoints ou o profile for desconhecido.
 func New(opts Options) (*Runtime, error) {
+	scen, err := scenario.ForProfile(opts.Profile)
+	if err != nil {
+		return nil, err
+	}
+
 	doc, err := openapi.Load(opts.SpecPath)
 	if err != nil {
 		return nil, err
@@ -36,12 +43,12 @@ func New(opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("no endpoints found in %q", opts.SpecPath)
 	}
 
-	return &Runtime{opts: opts, endpoints: endpoints}, nil
+	return &Runtime{opts: opts, endpoints: endpoints, scenario: scen}, nil
 }
 
 // Run inicia o servidor HTTP e bloqueia até ele parar.
 func (r *Runtime) Run() error {
-	srv := httptransport.New(r.opts.Addr, r.endpoints)
+	srv := httptransport.New(r.opts.Addr, r.endpoints, r.scenario)
 
 	fmt.Printf("MockSmith running on %s\n", r.opts.Addr)
 	fmt.Printf("Loaded %d endpoints\n", len(r.endpoints))

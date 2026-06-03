@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"strings"
+
 	"github.com/Claudio712005/mock-smith/internal/app"
+	"github.com/Claudio712005/mock-smith/internal/scenario"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +34,7 @@ func newRunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&addr, "addr", ":8080", "address the mock server listens on")
-	cmd.Flags().StringVar(&profile, "profile", "happy", "runtime profile (MVP: happy)")
+	cmd.Flags().StringVar(&profile, "profile", "happy",
+		"runtime profile ("+strings.Join(scenario.Available(), ", ")+")")
 	return cmd
 }

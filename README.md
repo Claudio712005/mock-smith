@@ -19,9 +19,10 @@ Loaded 23 endpoints
 Profile: happy
 ```
 
-> Status: **Fase 1 (MVP)**. Carrega a spec, descobre os endpoints e serve as
-> respostas de sucesso documentadas. Engine de cenários, interceptors e as flags
-> mais ricas estão no roadmap abaixo.
+> Status: **Fase 2**. Carrega a spec, descobre os endpoints e serve respostas
+> guiadas por um **profile de runtime** (`happy`, `sad`, `resilience`, `chaos`) —
+> sucesso, erro de negócio, erro de servidor, timeout, corpo malformado e
+> desconexão. Interceptors e flags por endpoint estão no roadmap abaixo.
 
 ---
 
@@ -35,8 +36,43 @@ Profile: happy
   1. exemplo explícito do OpenAPI,
   2. exemplo do schema,
   3. dado falso conforme o formato (email, uuid, uri, date/date-time, enums, números, …).
-- **Profile happy-path** — retorna a resposta de sucesso documentada (menor 2xx),
-  ou `204` quando nenhuma é documentada.
+- **Profiles de runtime** — o comportamento de cada requisição é sorteado por
+  peso conforme o `--profile`: sucesso, erro de negócio (4xx documentado), erro
+  de servidor (500/503), timeout (504 após atraso), corpo JSON malformado e
+  desconexão da conexão. Veja [Profiles](#profiles).
+- **Resposta de sucesso** — a documentada (menor 2xx), ou `204` quando nenhuma
+  é documentada. Prioridade do corpo descrita acima.
+
+---
+
+## Profiles
+
+O `--profile` define a distribuição de comportamentos por requisição. Os pesos
+são sorteados de forma independente a cada chamada.
+
+| Profile      | Distribuição                                                              |
+|--------------|--------------------------------------------------------------------------|
+| `happy`      | 100% sucesso                                                              |
+| `sad`        | 70% sucesso · 30% erro de negócio (4xx documentado, ou `400` genérico)    |
+| `resilience` | 90% sucesso · 5% timeout (504) · 5% `503`                                 |
+| `chaos`      | 80% sucesso · 5% JSON malformado · 5% timeout · 5% desconexão · 5% `500`  |
+
+Comportamentos:
+
+- **Erro de negócio** — devolve o menor erro `4xx` documentado do endpoint; sem
+  nenhum, sintetiza um `400` com corpo JSON genérico (`{ "code", "message" }`).
+- **Erro de servidor** — devolve o erro documentado com aquele status, ou um
+  corpo genérico com o status pedido.
+- **Timeout** — dorme ~30s (simulando serviço travado) e então responde `504`;
+  se o cliente cancelar antes, nada é escrito.
+- **Malformado** — responde `200` com `Content-Type: application/json` e um corpo
+  JSON propositalmente inválido (testa parsing/resiliência do cliente).
+- **Desconexão** — derruba a conexão sem responder (cliente vê erro de conexão).
+
+```bash
+mocksmith run examples/petstore.yaml --profile sad
+mocksmith run examples/petstore.yaml --profile chaos
+```
 
 ---
 
@@ -110,8 +146,8 @@ mocksmith run examples/petstore.json
 # porta customizada
 mocksmith run examples/petstore.yaml --addr :9090
 
-# profile explícito (MVP só suporta "happy")
-mocksmith run examples/petstore.yaml --profile happy
+# profile de runtime (happy, sad, resilience, chaos)
+mocksmith run examples/petstore.yaml --profile chaos
 ```
 
 Chame de outro terminal:
@@ -209,7 +245,7 @@ Sobe um servidor de mock a partir de uma spec OpenAPI.
 | Flag           | Padrão    | Descrição                                       |
 |----------------|-----------|-------------------------------------------------|
 | `--addr`       | `:8080`   | Endereço em que o servidor escuta.              |
-| `--profile`    | `happy`   | Profile de runtime. MVP só suporta `happy`.     |
+| `--profile`    | `happy`   | Profile de runtime: `happy`, `sad`, `resilience`, `chaos` (ver [Profiles](#profiles)). |
 | `-h`, `--help` | —         | Ajuda do comando.                               |
 
 ### Global
@@ -258,6 +294,7 @@ internal/
   cli/                comandos cobra (root, run)
   app/                wiring do runtime (carga → descoberta → serve)
   openapi/            carga da spec + descoberta de endpoints
+  scenario/           engine de profiles (sorteio de comportamento por peso)
   transport/http/     servidor chi e handlers das requisições
   domain/             modelos Endpoint / ResponseSpec
   faker/              geração de dado falso a partir do schema
