@@ -257,3 +257,120 @@ func TestE2E_NotFound(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+// --- SpringBoot legacy spec (string examples on integer fields) ---
+
+func loadSpringBootLegacyEndpoints(t *testing.T) []domain.Endpoint {
+	t.Helper()
+	doc, err := openapi.Load(filepath.Join("..", "examples", "springboot-legacy.json"))
+	if err != nil {
+		t.Fatalf("load springboot-legacy spec: %v", err)
+	}
+	eps := openapi.Discover(doc)
+	if len(eps) == 0 {
+		t.Fatal("no endpoints discovered in springboot-legacy spec")
+	}
+	return eps
+}
+
+func startSpringBootLegacyServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptransport.New(":0", loadSpringBootLegacyEndpoints(t), nil, nil)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// TestE2E_SpringBootLegacy_SpecLoads verifica que specs geradas pelo Spring Boot
+// com exemplos string em campos integer são carregadas sem erro de validação.
+func TestE2E_SpringBootLegacy_SpecLoads(t *testing.T) {
+	// loadSpringBootLegacyEndpoints chama openapi.Load internamente; se o fix de
+	// DisableExamplesValidation não estiver presente, o teste falha aqui com:
+	// "invalid example: validation failed due to: at '': got string, want integer"
+	eps := loadSpringBootLegacyEndpoints(t)
+	paths := make(map[string]bool, len(eps))
+	for _, ep := range eps {
+		paths[ep.Path] = true
+	}
+	for _, want := range []string{"/api/v1/pets", "/api/v2/pets"} {
+		if !paths[want] {
+			t.Errorf("endpoint %s not discovered", want)
+		}
+	}
+}
+
+// TestE2E_SpringBootLegacy_V1_Returns200 exercita o endpoint v1 com campos integer
+// cujo exemplo é uma string ("0001", "05") — padrão Spring Boot codegen.
+func TestE2E_SpringBootLegacy_V1_Returns200(t *testing.T) {
+	ts := startSpringBootLegacyServer(t)
+
+	resp, err := ts.Client().Post(ts.URL+"/api/v1/pets", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/v1/pets: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+}
+
+// TestE2E_SpringBootLegacy_V2_Returns200 exercita o endpoint v2 cujo schema
+// usa campos string com pattern alfanumérico (sem exemplos inválidos).
+func TestE2E_SpringBootLegacy_V2_Returns200(t *testing.T) {
+	ts := startSpringBootLegacyServer(t)
+
+	resp, err := ts.Client().Post(ts.URL+"/api/v2/pets", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /api/v2/pets: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+}
+
+// TestE2E_SpringBootLegacy_AdminListsEndpoints confirma que os dois endpoints
+// do spec springboot-legacy aparecem na listagem administrativa do MockSmith.
+func TestE2E_SpringBootLegacy_AdminListsEndpoints(t *testing.T) {
+	ts := startSpringBootLegacyServer(t)
+
+	var out struct {
+		Count     int `json:"count"`
+		Endpoints []struct {
+			Method string `json:"method"`
+			Path   string `json:"path"`
+		} `json:"endpoints"`
+	}
+	resp := getJSON(t, ts, "/__mocksmith/endpoints", &out)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	want := map[string]bool{
+		"POST /api/v1/pets": false,
+		"POST /api/v2/pets": false,
+	}
+	for _, ep := range out.Endpoints {
+		key := ep.Method + " " + ep.Path
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+	}
+	for key, found := range want {
+		if !found {
+			t.Errorf("admin list missing endpoint %s", key)
+		}
+	}
+}

@@ -73,3 +73,69 @@ func TestLoad_ExampleSpec(t *testing.T) {
 		t.Fatal("petstore missing /pets")
 	}
 }
+
+// TestLoad_SpringBootLegacyJSON garante que specs com exemplos string em campos
+// integer — padrão gerado pelo Spring Boot codegen — são carregadas sem erro.
+func TestLoad_SpringBootLegacyJSON(t *testing.T) {
+	doc, err := Load(filepath.Join("..", "..", "examples", "springboot-legacy.json"))
+	if err != nil {
+		t.Fatalf("Load(springboot-legacy) error = %v", err)
+	}
+	if doc.Paths == nil {
+		t.Fatal("Load(springboot-legacy) returned doc with no paths")
+	}
+	if doc.Paths.Find("/api/v1/pets") == nil {
+		t.Fatal("springboot-legacy missing /api/v1/pets")
+	}
+	if doc.Paths.Find("/api/v2/pets") == nil {
+		t.Fatal("springboot-legacy missing /api/v2/pets")
+	}
+}
+
+// TestLoad_StringExampleOnIntegerField garante que specs com exemplos de tipo
+// incorreto (string em campo integer, comum em specs geradas por Spring Boot)
+// são carregadas sem erro, com a validação de exemplos desabilitada.
+func TestLoad_StringExampleOnIntegerField(t *testing.T) {
+	const spec = `
+openapi: "3.1.0"
+info:
+  title: SpringGenerated
+  version: 1.0.0
+paths:
+  /resource:
+    post:
+      operationId: create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: integer
+                  format: int32
+                  example: "0001"
+                branch:
+                  type: integer
+                  format: int32
+                  example: "05"
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+`
+	doc, err := Load(writeSpec(t, "spring.yaml", spec))
+	if err != nil {
+		t.Fatalf("Load(string-example-on-integer) error = %v; want nil (examples validation must be lenient)", err)
+	}
+	if doc.Paths.Find("/resource") == nil {
+		t.Fatal("missing /resource path")
+	}
+}
