@@ -1,5 +1,8 @@
 # MockSmith
 
+[![CI](https://github.com/Claudio712005/mock-smith/actions/workflows/ci.yml/badge.svg)](https://github.com/Claudio712005/mock-smith/actions/workflows/ci.yml)
+[![Go 1.26+](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
+
 Engine de mock de APIs em runtime, guiado por specs OpenAPI/Swagger.
 
 O MockSmith lê um documento OpenAPI 3 (ou Swagger) e sobe um mock HTTP ao vivo
@@ -259,6 +262,64 @@ internal/
   domain/             modelos Endpoint / ResponseSpec
   faker/              geração de dado falso a partir do schema
 examples/             specs de exemplo para teste
+test/                 testes end-to-end (spec real → servidor HTTP vivo)
+.github/workflows/    pipeline de CI (build, lint, testes)
+```
+
+---
+
+## Dependências
+
+Bibliotecas diretas (ver [`go.mod`](go.mod) para versões exatas):
+
+| Lib | Versão | Papel no MockSmith |
+|-----|--------|--------------------|
+| [`getkin/kin-openapi`](https://github.com/getkin/kin-openapi) | `v0.139.0` | Parse, validação e resolução de `$ref` de documentos OpenAPI 3 (YAML/JSON). Modela schemas/respostas usados na descoberta e na geração de corpo. Usada em `internal/openapi` e `internal/faker`. |
+| [`go-chi/chi/v5`](https://github.com/go-chi/chi) | `v5.3.0` | Roteador HTTP. Templates OpenAPI (`/users/{id}`) casam direto com a sintaxe do chi. Middlewares `RequestID`, `Logger`, `Recoverer`. Usada em `internal/transport/http`. |
+| [`spf13/cobra`](https://github.com/spf13/cobra) | `v1.10.2` | Framework de CLI: comando raiz `mocksmith`, subcomando `run`, flags e help. Usada em `internal/cli`. |
+| [`brianvoe/gofakeit/v7`](https://github.com/brianvoe/gofakeit) | `v7.15.0` | Geração de dado falso ciente de formato (email, uuid, uri, date/date-time, ipv4/ipv6, números, strings com bounds). Usada em `internal/faker`. |
+
+As demais entradas do `go.mod` são dependências **indiretas** (transitivas) puxadas pelas acima — não importadas direto pelo código.
+
+---
+
+## Desenvolvimento & testes
+
+Suíte de testes unitários (`internal/...`) + end-to-end (`test/`, sobe um servidor
+HTTP vivo a partir da spec de exemplo).
+
+```bash
+# todos os testes
+go test ./...
+
+# com race detector e cobertura
+go test -race -cover ./...
+
+# relatório de cobertura por função
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+
+# só os e2e
+go test ./test/...
+```
+
+### CI
+
+Toda push/PR para `main` dispara o workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
+que roda no Go 1.26.3:
+
+1. **gofmt** — falha se houver arquivo não formatado.
+2. **`go vet ./...`** — análise estática.
+3. **`go test -race -coverprofile`** — testes com race detector e cobertura.
+4. **`go build`** — garante que o binário compila.
+
+Antes de abrir PR, rode localmente o mesmo conjunto:
+
+```bash
+gofmt -l .          # deve sair vazio
+go vet ./...
+go test -race ./...
+go build -o mocksmith ./cmd/mocksmith
 ```
 
 ---

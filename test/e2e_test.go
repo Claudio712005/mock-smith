@@ -1,0 +1,211 @@
+// Package e2e exercises MockSmith end-to-end: a real OpenAPI spec is loaded,
+// discovered, and served over a live HTTP listener, then probed with a client.
+package e2e
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"testing"
+
+	"github.com/Claudio712005/mock-smith/internal/openapi"
+	httptransport "github.com/Claudio712005/mock-smith/internal/transport/http"
+)
+
+func startServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	specPath := filepath.Join("..", "examples", "petstore.yaml")
+
+	doc, err := openapi.Load(specPath)
+	if err != nil {
+		t.Fatalf("load spec: %v", err)
+	}
+	endpoints := openapi.Discover(doc)
+	if len(endpoints) == 0 {
+		t.Fatal("no endpoints discovered")
+	}
+
+	srv := httptransport.New(":0", endpoints)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func getJSON(t *testing.T, ts *httptest.Server, path string, out any) *http.Response {
+	t.Helper()
+	resp, err := ts.Client().Get(ts.URL + path)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+	}
+	return resp
+}
+
+func TestE2E_ListPets_GeneratesArray(t *testing.T) {
+	ts := startServer(t)
+
+	var pets []map[string]any
+	resp := getJSON(t, ts, "/pets", &pets)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	// schema declares minItems: 3
+	if len(pets) < 3 {
+		t.Fatalf("got %d pets, want >= 3 (minItems)", len(pets))
+	}
+	first := pets[0]
+	// required fields present
+	for _, k := range []string{"id", "name", "status"} {
+		if _, ok := first[k]; !ok {
+			t.Errorf("pet missing required field %q: %v", k, first)
+		}
+	}
+	// enum status → first value "available"
+	if first["status"] != "available" {
+		t.Errorf("status = %v, want available (first enum)", first["status"])
+	}
+	// example on Pet.name
+	if first["name"] != "Rex" {
+		t.Errorf("name = %v, want Rex (schema example)", first["name"])
+	}
+}
+
+func TestE2E_GetUser_UsesMediaExample(t *testing.T) {
+	ts := startServer(t)
+
+	var user map[string]any
+	resp := getJSON(t, ts, "/users/anything", &user)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if user["name"] != "Ada Lovelace" {
+		t.Errorf("name = %v, want Ada Lovelace (media example)", user["name"])
+	}
+	if user["email"] != "ada@example.com" {
+		t.Errorf("email = %v, want example value", user["email"])
+	}
+}
+
+func TestE2E_CreatePet_201(t *testing.T) {
+	ts := startServer(t)
+
+	resp, err := ts.Client().Post(ts.URL+"/pets", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /pets: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var pet map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&pet); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := pet["id"]; !ok {
+		t.Errorf("created pet missing id: %v", pet)
+	}
+}
+
+func TestE2E_DeletePet_204NoBody(t *testing.T) {
+	ts := startServer(t)
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/pets/7", nil)
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if len(b) != 0 {
+		t.Fatalf("204 body not empty: %q", b)
+	}
+}
+
+func TestE2E_Admin_ListEndpoints(t *testing.T) {
+	ts := startServer(t)
+
+	var out struct {
+		Count     int `json:"count"`
+		Endpoints []struct {
+			Method   string `json:"method"`
+			Path     string `json:"path"`
+			Statuses []int  `json:"statuses"`
+		} `json:"endpoints"`
+	}
+	resp := getJSON(t, ts, "/__mocksmith/endpoints", &out)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if out.Count == 0 || out.Count != len(out.Endpoints) {
+		t.Fatalf("count mismatch: count=%d len=%d", out.Count, len(out.Endpoints))
+	}
+	// petstore has GET /pets among others
+	found := false
+	for _, e := range out.Endpoints {
+		if e.Method == "GET" && e.Path == "/pets" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("admin list missing GET /pets")
+	}
+}
+
+func TestE2E_Admin_EndpointDetail(t *testing.T) {
+	ts := startServer(t)
+
+	var d struct {
+		Method  string `json:"method"`
+		Path    string `json:"path"`
+		Success *struct {
+			Status  int  `json:"status"`
+			HasBody bool `json:"hasBody"`
+		} `json:"success"`
+		Errors []struct {
+			Status int `json:"status"`
+		} `json:"errors"`
+	}
+	resp := getJSON(t, ts, "/__mocksmith/endpoint?method=post&path=/payments", &d)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if d.Success == nil || d.Success.Status != 201 {
+		t.Fatalf("success wrong: %+v", d.Success)
+	}
+	// payments declares a 503 error
+	has503 := false
+	for _, e := range d.Errors {
+		if e.Status == 503 {
+			has503 = true
+		}
+	}
+	if !has503 {
+		t.Errorf("expected 503 in errors: %+v", d.Errors)
+	}
+}
+
+func TestE2E_NotFound(t *testing.T) {
+	ts := startServer(t)
+	resp := getJSON(t, ts, "/does-not-exist", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}

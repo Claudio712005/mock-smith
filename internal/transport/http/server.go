@@ -38,6 +38,10 @@ func New(addr string, endpoints []domain.Endpoint) *Server {
 // Addr devolve o endereço de escuta.
 func (s *Server) Addr() string { return s.addr }
 
+// Handler expõe o roteador configurado como http.Handler, permitindo servir os
+// endpoints sem iniciar um listener (útil para testes e composição).
+func (s *Server) Handler() http.Handler { return s.router }
+
 // ListenAndServe inicia o servidor HTTP e bloqueia.
 func (s *Server) ListenAndServe() error {
 	return http.ListenAndServe(s.addr, s.router)
