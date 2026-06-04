@@ -46,6 +46,7 @@ func registerAdmin(r chi.Router, endpoints []domain.Endpoint, overrides *interce
 
 type runtimeRequest struct {
 	Endpoint  string  `json:"endpoint"`
+	Method    string  `json:"method"`
 	Status    int     `json:"status"`
 	LatencyMs int     `json:"latencyMs"`
 	Rate      float64 `json:"rate"`
@@ -72,8 +73,13 @@ func setRuntimeHandler(endpoints []domain.Endpoint, overrides *interceptor.Overr
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "field 'endpoint' is required"})
 			return
 		}
-		if !pathExists(endpoints, body.Endpoint) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no endpoint with path " + body.Endpoint})
+		method := strings.ToUpper(strings.TrimSpace(body.Method))
+		if !endpointExists(endpoints, method, body.Endpoint) {
+			target := body.Endpoint
+			if method != "" {
+				target = method + " " + body.Endpoint
+			}
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no endpoint matching " + target})
 			return
 		}
 		if body.Status != 0 && (body.Status < 100 || body.Status > 599) {
@@ -94,9 +100,10 @@ func setRuntimeHandler(endpoints []domain.Endpoint, overrides *interceptor.Overr
 		}
 
 		ov := interceptor.Override{Status: body.Status, LatencyMs: body.LatencyMs, Rate: body.Rate}
-		overrides.Set(body.Endpoint, ov)
+		overrides.Set(method, body.Endpoint, ov)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"endpoint": body.Endpoint,
+			"method":   method,
 			"override": ov,
 		})
 	}
@@ -110,17 +117,23 @@ func deleteRuntimeHandler(overrides *interceptor.Overrides) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, map[string]any{"cleared": n})
 			return
 		}
-		if !overrides.Delete(path) {
+		method := strings.ToUpper(strings.TrimSpace(req.URL.Query().Get("method")))
+		if !overrides.Delete(method, path) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no override for " + path})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"deleted": path})
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": path, "method": method})
 	}
 }
 
-func pathExists(endpoints []domain.Endpoint, path string) bool {
+// endpointExists reporta se algum endpoint casa com path; se method != "", exige
+// também o método.
+func endpointExists(endpoints []domain.Endpoint, method, path string) bool {
 	for _, ep := range endpoints {
-		if ep.Path == path {
+		if ep.Path != path {
+			continue
+		}
+		if method == "" || ep.Method == method {
 			return true
 		}
 	}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Claudio712005/mock-smith/internal/app"
@@ -31,8 +32,8 @@ func newRunCmd() *cobra.Command {
 			"  mocksmith run openapi.yaml --addr :9090\n" +
 			"  mocksmith run openapi.yaml --slow /payments=2s --fail /auth=503\n" +
 			"  mocksmith run openapi.yaml --sequence /jobs=202,202,200\n" +
-			"  mocksmith run --config            # loads ./mocksmith.yaml\n" +
-			"  mocksmith run --config dev.yaml",
+			"  mocksmith run --config mocksmith.yaml\n" +
+			"  mocksmith run --config examples/mocksmith.yaml",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var opts app.Options
 			if cmd.Flags().Changed("config") {
@@ -53,7 +54,12 @@ func newRunCmd() *cobra.Command {
 				opts.ForceStatus = forceStatus
 			}
 
+			// Spec do config resolve relativo ao diretório do arquivo de config;
+			// spec posicional resolve relativo ao diretório atual.
 			spec := opts.SpecPath
+			if spec != "" && !filepath.IsAbs(spec) && configPath != "" {
+				spec = filepath.Join(filepath.Dir(configPath), spec)
+			}
 			if len(args) > 0 {
 				spec = args[0]
 			}
@@ -92,7 +98,6 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&sequence, "sequence", nil,
 		"return statuses in order per request, [path=]s1,s2,..., e.g. /jobs=202,202,200 (repeatable)")
 	cmd.Flags().StringVar(&configPath, "config", "",
-		"load behavior from a YAML config file (default "+config.DefaultFile+")")
-	cmd.Flags().Lookup("config").NoOptDefVal = config.DefaultFile
+		"path to a YAML config file, e.g. "+config.DefaultFile)
 	return cmd
 }

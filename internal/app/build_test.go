@@ -123,18 +123,20 @@ func TestParseStatuses(t *testing.T) {
 
 func TestSplitTarget(t *testing.T) {
 	tests := []struct {
-		in        string
-		path, val string
+		in                string
+		method, path, val string
 	}{
-		{"/pets=2s", "/pets", "2s"},
-		{"2s", "", "2s"},
-		{"/a/b=503", "/a/b", "503"},
-		{"=5", "", "5"},
+		{"/pets=2s", "", "/pets", "2s"},
+		{"2s", "", "", "2s"},
+		{"/a/b=503", "", "/a/b", "503"},
+		{"=5", "", "", "5"},
+		{"POST /pets=2s", "POST", "/pets", "2s"},
+		{"get /pets/{id}=503", "GET", "/pets/{id}", "503"},
 	}
 	for _, tc := range tests {
-		p, v := splitTarget(tc.in)
-		if p != tc.path || v != tc.val {
-			t.Errorf("splitTarget(%q) = (%q,%q), want (%q,%q)", tc.in, p, v, tc.path, tc.val)
+		m, p, v := splitTarget(tc.in)
+		if m != tc.method || p != tc.path || v != tc.val {
+			t.Errorf("splitTarget(%q) = (%q,%q,%q), want (%q,%q,%q)", tc.in, m, p, v, tc.method, tc.path, tc.val)
 		}
 	}
 }

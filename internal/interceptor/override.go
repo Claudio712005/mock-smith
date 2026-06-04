@@ -2,6 +2,7 @@ package interceptor
 
 import (
 	"math/rand/v2"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,8 +18,9 @@ type Override struct {
 }
 
 // Overrides guarda, de forma segura para concorrência, os overrides ativos por
-// endpoint (chave = path do template OpenAPI). Leituras vêm do hot path das
-// requisições; escritas, da Admin API.
+// endpoint. A chave é "METHOD path" quando há método, ou só "path" para valer em
+// qualquer método. Leituras vêm do hot path das requisições; escritas, da Admin
+// API.
 type Overrides struct {
 	mu sync.RWMutex
 	m  map[string]Override
@@ -29,27 +31,41 @@ func NewOverrides() *Overrides {
 	return &Overrides{m: make(map[string]Override)}
 }
 
-// Set define (ou substitui) o override de um endpoint.
-func (o *Overrides) Set(path string, ov Override) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.m[path] = ov
+func overrideKey(method, path string) string {
+	if method == "" {
+		return path
+	}
+	return strings.ToUpper(method) + " " + path
 }
 
-// Get devolve o override de um endpoint, se houver.
-func (o *Overrides) Get(path string) (Override, bool) {
+// Set define (ou substitui) o override de um endpoint. Método vazio vale para
+// qualquer método daquele path.
+func (o *Overrides) Set(method, path string, ov Override) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.m[overrideKey(method, path)] = ov
+}
+
+// Get devolve o override aplicável a um endpoint: primeiro o específico do
+// método, senão o de qualquer método (path puro).
+func (o *Overrides) Get(method, path string) (Override, bool) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
+	if ov, ok := o.m[overrideKey(method, path)]; ok {
+		return ov, true
+	}
 	ov, ok := o.m[path]
 	return ov, ok
 }
 
-// Delete remove o override de um endpoint, devolvendo se existia.
-func (o *Overrides) Delete(path string) bool {
+// Delete remove o override de uma chave (mesma forma usada em Set), devolvendo
+// se existia.
+func (o *Overrides) Delete(method, path string) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	_, ok := o.m[path]
-	delete(o.m, path)
+	key := overrideKey(method, path)
+	_, ok := o.m[key]
+	delete(o.m, key)
 	return ok
 }
 
@@ -87,7 +103,7 @@ func NewOverrideInterceptor(store *Overrides) *OverrideInterceptor {
 // Apply consulta o override do endpoint e, se houver, adiciona latência e/ou
 // sobrescreve o status.
 func (i *OverrideInterceptor) Apply(ctx *Context) error {
-	ov, ok := i.store.Get(ctx.Endpoint.Path)
+	ov, ok := i.store.Get(ctx.Endpoint.Method, ctx.Endpoint.Path)
 	if !ok {
 		return nil
 	}

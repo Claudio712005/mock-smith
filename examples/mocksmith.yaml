@@ -1,8 +1,8 @@
 # =============================================================================
 # MockSmith — arquivo de configuração de exemplo (completo)
 #
-# Rode a partir deste diretório:   mocksmith run --config
-# Ou aponte para o arquivo:        mocksmith run --config examples/mocksmith.yaml
+# Aponte para o arquivo:           mocksmith run --config examples/mocksmith.yaml
+# Ou de dentro desta pasta:        cd examples && mocksmith run --config mocksmith.yaml
 #
 # Flags da CLI SOBREPÕEM este arquivo:
 #   - escalares (--addr, --profile, --force-status) vencem
@@ -10,7 +10,7 @@
 # Chave desconhecida no YAML = erro (pega typo).
 # =============================================================================
 
-# Caminho da spec OpenAPI (relativo ao diretório onde o comando roda).
+# Caminho da spec OpenAPI (relativo ao diretório deste arquivo de config).
 spec: shop-api.yaml
 
 # Endereço de escuta.
@@ -29,7 +29,8 @@ forceStatus: 0
 
 # -----------------------------------------------------------------------------
 # Comportamentos por endpoint.
-# Chave = template OpenAPI exato (igual ao que aparece em /__mocksmith/endpoints).
+# Chave = "[MÉTODO ]path"; o path é o template OpenAPI exato (igual ao que aparece
+# em /__mocksmith/endpoints). Sem método, vale para qualquer verbo daquele path.
 # Campos: fail (int) | slow (duração) | timeout (taxa) | corrupt (taxa) | sequence ([int])
 # -----------------------------------------------------------------------------
 endpoints:
@@ -44,9 +45,12 @@ endpoints:
     timeout: 15%      # 15% das requisições viram timeout (504)
     corrupt: 5%       # 5% recebem corpo JSON malformado
 
-  # Detalhe de produto: só latência (serviço lento, mas correto).
-  /products/{productId}:
+  # Mesmo path, comportamento por método:
+  # GET (detalhe) só fica lento; DELETE sempre conflita (409).
+  GET /products/{productId}:
     slow: 400ms
+  DELETE /products/{productId}:
+    fail: 409
 
   # Busca: bem lenta (índice pesado).
   /search:
@@ -74,13 +78,14 @@ endpoints:
 
 # -----------------------------------------------------------------------------
 # Overrides iniciais da Admin API (estado de runtime já no boot).
-# Mutáveis em runtime via `mocksmith inject` / POST /__mocksmith/runtime.
+# Chave = "[MÉTODO ]path" (igual aos endpoints). Mutáveis em runtime via
+# `mocksmith inject` / POST /__mocksmith/runtime.
 # Campos: status (int) | latencyMs (int) | rate (0..1, fração afetada pelo status)
 # -----------------------------------------------------------------------------
 overrides:
 
-  # Usuário: metade das requisições cai em 503, todas com 1.5s de latência.
-  /users/{userId}:
+  # Só o GET do usuário: metade cai em 503, todas com 1.5s de latência.
+  GET /users/{userId}:
     status: 503
     latencyMs: 1500
     rate: 0.5

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Claudio712005/mock-smith/internal/interceptor"
 	"github.com/spf13/cobra"
 )
 
@@ -23,13 +24,13 @@ func newInjectCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "inject [\"/path:status(rate%)\"]",
+		Use:   "inject [\"[METHOD ]path:status(rate%)\"]",
 		Short: "Change a running server's behavior via its Admin API",
 		Example: "  mocksmith inject \"/payments:503(20%)\"\n" +
-			"  mocksmith inject /payments:503\n" +
-			"  mocksmith inject /payments --latency-ms 2000\n" +
+			"  mocksmith inject \"POST /payments:503\"      # only the POST verb\n" +
+			"  mocksmith inject \"GET /payments\" --latency-ms 2000\n" +
 			"  mocksmith inject --list\n" +
-			"  mocksmith inject --remove /payments\n" +
+			"  mocksmith inject --remove \"POST /payments\"\n" +
 			"  mocksmith inject --clear",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -39,23 +40,24 @@ func newInjectCmd() *cobra.Command {
 			case list:
 				return injectList(base)
 			case clear:
-				return injectDelete(base, "")
+				return injectDelete(base, "", "")
 			case remove != "":
-				return injectDelete(base, remove)
+				method, path := interceptor.SplitTarget(remove)
+				return injectDelete(base, method, path)
 			}
 
 			if len(args) == 0 {
-				return fmt.Errorf("nothing to do: pass \"/path:status(rate%%)\" or use --list/--remove/--clear")
+				return fmt.Errorf("nothing to do: pass \"[METHOD ]path:status(rate%%)\" or use --list/--remove/--clear")
 			}
 
-			path, status, rate, err := parseInject(args[0])
+			method, path, status, rate, err := parseInject(args[0])
 			if err != nil {
 				return err
 			}
 			if status == 0 && latencyMs == 0 {
 				return fmt.Errorf("set a status (e.g. /payments:503) or --latency-ms")
 			}
-			return injectSet(base, path, status, latencyMs, rate)
+			return injectSet(base, method, path, status, latencyMs, rate)
 		},
 	}
 
@@ -63,43 +65,46 @@ func newInjectCmd() *cobra.Command {
 	cmd.Flags().IntVar(&latencyMs, "latency-ms", 0, "latency in milliseconds to inject")
 	cmd.Flags().BoolVar(&list, "list", false, "list active runtime overrides")
 	cmd.Flags().BoolVar(&clear, "clear", false, "clear all runtime overrides")
-	cmd.Flags().StringVar(&remove, "remove", "", "remove the override of a specific endpoint path")
+	cmd.Flags().StringVar(&remove, "remove", "", "remove an override, [METHOD ]path, e.g. \"POST /payments\"")
 	return cmd
 }
 
 const adminRuntimePath = "/__mocksmith/runtime"
 
-func parseInject(s string) (path string, status int, rate float64, err error) {
+func parseInject(s string) (method, path string, status int, rate float64, err error) {
 	if i := strings.Index(s, "("); i >= 0 {
 		if !strings.HasSuffix(s, "%)") {
-			return "", 0, 0, fmt.Errorf("invalid rate in %q (want \"(NN%%)\")", s)
+			return "", "", 0, 0, fmt.Errorf("invalid rate in %q (want \"(NN%%)\")", s)
 		}
 		pct := s[i+1 : len(s)-2]
 		n, perr := strconv.ParseFloat(pct, 64)
 		if perr != nil || n < 0 || n > 100 {
-			return "", 0, 0, fmt.Errorf("invalid rate %q (want 0-100)", pct)
+			return "", "", 0, 0, fmt.Errorf("invalid rate %q (want 0-100)", pct)
 		}
 		rate = n / 100
 		s = s[:i]
 	}
 
-	path = s
+	target := s
 	if i := strings.LastIndex(s, ":"); i >= 0 {
-		path = s[:i]
+		target = s[:i]
 		status, err = strconv.Atoi(s[i+1:])
 		if err != nil || status < 100 || status > 599 {
-			return "", 0, 0, fmt.Errorf("invalid status in %q (want path:status, 100-599)", s)
+			return "", "", 0, 0, fmt.Errorf("invalid status in %q (want [METHOD ]path:status, 100-599)", s)
 		}
 	}
+
+	method, path = interceptor.SplitTarget(target)
 	if path == "" {
-		return "", 0, 0, fmt.Errorf("missing endpoint path")
+		return "", "", 0, 0, fmt.Errorf("missing endpoint path")
 	}
-	return path, status, rate, nil
+	return method, path, status, rate, nil
 }
 
-func injectSet(base, path string, status, latencyMs int, rate float64) error {
+func injectSet(base, method, path string, status, latencyMs int, rate float64) error {
 	body, _ := json.Marshal(map[string]any{
 		"endpoint":  path,
+		"method":    method,
 		"status":    status,
 		"latencyMs": latencyMs,
 		"rate":      rate,
@@ -119,10 +124,13 @@ func injectList(base string) error {
 	return printResponse(resp)
 }
 
-func injectDelete(base, path string) error {
+func injectDelete(base, method, path string) error {
 	target := base
 	if path != "" {
 		target += "?endpoint=" + url.QueryEscape(path)
+		if method != "" {
+			target += "&method=" + url.QueryEscape(method)
+		}
 	}
 	req, _ := http.NewRequest(http.MethodDelete, target, nil)
 	resp, err := http.DefaultClient.Do(req)

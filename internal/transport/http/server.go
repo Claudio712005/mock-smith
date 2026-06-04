@@ -34,8 +34,9 @@ func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario, chain
 	}
 
 	overrides := interceptor.NewOverrides()
-	for path, ov := range initialOverrides {
-		overrides.Set(path, ov)
+	for target, ov := range initialOverrides {
+		method, path := interceptor.SplitTarget(target)
+		overrides.Set(method, path, ov)
 	}
 	chain = append(chain, interceptor.NewOverrideInterceptor(overrides))
 

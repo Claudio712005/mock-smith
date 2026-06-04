@@ -219,9 +219,17 @@ Interceptors disponíveis no engine:
 ### Flags por endpoint
 
 Quatro flags injetam interceptors. Todas são **repetíveis** e usam o formato
-`[path=]valor`: com `path=`, o efeito vale só naquele endpoint (casamento exato
-contra o template OpenAPI, ex.: `/pets/{petId}`); sem `path=`, vale para **todos**.
-Endpoints fora do escopo seguem o profile normalmente.
+`[[MÉTODO ]path=]valor`:
+
+- `path=valor` — vale só naquele path (casamento exato contra o template OpenAPI,
+  ex.: `/pets/{petId}`), em **qualquer** método;
+- `MÉTODO path=valor` — restringe a um verbo HTTP, ex.: `"POST /payments=503"`.
+  Útil quando o mesmo path tem vários métodos (GET/POST/DELETE) e você quer afetar
+  só um;
+- `valor` (sem `path=`) — vale para **todos** os endpoints.
+
+Endpoints fora do escopo seguem o profile normalmente. Como o alvo pode conter
+espaço (método + path), use aspas no shell.
 
 | Flag        | Valor             | Efeito                                                        |
 |-------------|-------------------|--------------------------------------------------------------|
@@ -246,11 +254,16 @@ mocksmith run examples/petstore.yaml \
 
 # latência global (sem path) + falha pontual
 mocksmith run examples/petstore.yaml --slow 300ms --fail /payments=503
+
+# mesmo path, métodos diferentes: só o POST falha, o GET fica lento
+mocksmith run examples/shop-api.yaml \
+  --fail "POST /products/{productId}=409" \
+  --slow "GET /products/{productId}=400ms"
 ```
 
 ### Sequências stateful (`--sequence`)
 
-`--sequence [path=]s1,s2,...` devolve os status **em ordem, um por requisição** ao
+`--sequence [[MÉTODO ]path=]s1,s2,...` devolve os status **em ordem, um por requisição** ao
 endpoint. Esgotada a lista, **fixa no último** — ideal para polling (ex.: job que
 fica `202 Accepted` e depois `200 OK`). É stateful por endpoint, com contador
 seguro para concorrência.
@@ -272,13 +285,65 @@ status deve estar em `100–599`.
 
 ## Requisitos
 
-- [Go 1.26+](https://go.dev/dl/) (só necessário para compilar/instalar a partir do código).
+- **[Go 1.26+](https://go.dev/dl/)** — necessário para compilar/instalar a partir
+  do código. Veja [Instalar o Go](#1-instalar-o-go) abaixo.
 
 ---
 
 ## Instalação
 
-### Opção A — instalar o binário (recomendado)
+São dois passos: instalar o **Go** (toolchain) e depois instalar o **MockSmith**.
+
+### 1. Instalar o Go
+
+Confira se já tem (precisa ser `1.26+`):
+
+```bash
+go version
+```
+
+Se não tiver, instale conforme o SO:
+
+#### macOS
+
+```bash
+# Homebrew (recomendado)
+brew install go
+
+# ou baixe o pacote .pkg oficial:
+#   https://go.dev/dl/  → go<versão>.darwin-<arm64|amd64>.pkg
+```
+
+#### Linux
+
+```bash
+# baixe e extraia o tarball oficial (substitua a versão/arch)
+curl -LO https://go.dev/dl/go1.26.0.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz
+
+# adicione ao PATH (em ~/.bashrc ou ~/.zshrc) e recarregue o shell
+export PATH="$PATH:/usr/local/go/bin"
+```
+
+> Distros têm `apt install golang` / `dnf install golang`, mas costumam trazer
+> versões antigas. Para garantir `1.26+`, prefira o tarball oficial.
+
+#### Windows
+
+```powershell
+# winget (recomendado)
+winget install --id GoLang.Go -e
+
+# ou baixe o instalador .msi oficial:
+#   https://go.dev/dl/  → go<versão>.windows-amd64.msi
+```
+
+Feche e reabra o terminal depois de instalar. Doc oficial:
+[go.dev/doc/install](https://go.dev/doc/install).
+
+### 2. Instalar o MockSmith
+
+#### Opção A — instalar o binário (recomendado)
 
 ```bash
 go install github.com/Claudio712005/mock-smith/cmd/mocksmith@latest
@@ -287,30 +352,39 @@ go install github.com/Claudio712005/mock-smith/cmd/mocksmith@latest
 Isso coloca o binário `mocksmith` no diretório bin do Go. Garanta que ele está
 no `PATH`:
 
-- **Linux / macOS** — adicione ao `~/.bashrc` / `~/.zshrc`:
+- **Linux / macOS** — adicione ao `~/.bashrc` / `~/.zshrc` e recarregue:
 
   ```bash
   export PATH="$PATH:$(go env GOPATH)/bin"
   ```
 
 - **Windows (PowerShell)** — o `go install` usa `%USERPROFILE%\go\bin`. Adicione
-  uma vez:
+  uma vez e reinicie o terminal:
 
   ```powershell
   setx PATH "$($env:PATH);$($env:USERPROFILE)\go\bin"
   ```
 
-  Reinicie o terminal depois.
+Confirme: `mocksmith --help`.
 
-### Opção B — compilar a partir do código
+> **Atenção:** `@latest` baixa a última versão **publicada** no GitHub. Para rodar
+> mudanças locais ainda não publicadas, instale a partir do repositório clonado
+> (`go install ./cmd/mocksmith`) — veja a Opção B.
+
+#### Opção B — compilar a partir do código (mudanças locais)
 
 ```bash
 git clone https://github.com/Claudio712005/mock-smith.git
 cd mock-smith
-go build -o mocksmith ./cmd/mocksmith
+
+# instala no PATH a partir do código local
+go install ./cmd/mocksmith
+
+# ou apenas gera o binário ./mocksmith na pasta
+go build -o mocksmith ./cmd/mocksmith   # rode com ./mocksmith
 ```
 
-### Opção C — rodar sem instalar
+#### Opção C — rodar sem instalar
 
 A partir da raiz do projeto (pasta que contém o `go.mod`):
 
@@ -442,38 +516,43 @@ vale até ser removido.
 ### `POST /__mocksmith/runtime` — define um override
 
 ```json
-{ "endpoint": "/payments", "status": 503, "latencyMs": 2000, "rate": 0.2 }
+{ "endpoint": "/payments", "method": "POST", "status": 503, "latencyMs": 2000, "rate": 0.2 }
 ```
 
 | Campo       | Obrigatório | Descrição                                                     |
 |-------------|-------------|---------------------------------------------------------------|
 | `endpoint`  | sim         | Path do template OpenAPI (ex.: `/pets/{petId}`). Deve existir. |
+| `method`    | —           | Verbo HTTP a restringir (ex.: `POST`). Vazio = qualquer método daquele path. |
 | `status`    | —           | Status HTTP a forçar (`100–599`). Igual ao sucesso documentado usa o corpo de sucesso. |
 | `latencyMs` | —           | Atraso em milissegundos antes de responder.                   |
 | `rate`      | —           | Fração `0–1` das requisições afetadas pelo `status` (vazio/`0` = sempre). |
 
 Pelo menos um de `status` ou `latencyMs`. `POST` **substitui** o override inteiro
-do endpoint — combine status e latência numa só chamada. Respostas: `200` (ok),
-`400` (corpo/valores inválidos), `404` (endpoint inexistente).
+daquele `method`+`endpoint` — combine status e latência numa só chamada. Um override
+com `method` específico vence o de qualquer-método no mesmo path. Respostas: `200`
+(ok), `400` (corpo/valores inválidos), `404` (endpoint/método inexistente).
 
 ### `GET /__mocksmith/runtime` — lista os overrides ativos
 
+As chaves saem como `"MÉTODO path"` (ou só `"path"` quando sem método).
+
 ### `DELETE /__mocksmith/runtime` — remove
 
-- `?endpoint=/payments` remove um (`404` se não existir);
+- `?endpoint=/payments` remove o de qualquer-método; some `&method=POST` para o
+  método específico (`404` se não existir);
 - sem query, limpa todos e devolve `{ "cleared": N }`.
 
 ### CLI `mocksmith inject`
 
 Atalho que conversa com a Admin API de um servidor rodando (`--addr`, padrão
-`:8080`).
+`:8080`). O alvo aceita `[MÉTODO ]path` (use aspas por causa do espaço).
 
 ```bash
-mocksmith inject "/payments:503(20%)"        # 20% das req → 503
-mocksmith inject "/payments:503" --latency-ms 2000
-mocksmith inject /payments --latency-ms 2000 # só latência
+mocksmith inject "/payments:503(20%)"          # 20% das req → 503 (qualquer método)
+mocksmith inject "POST /payments:503"          # só o verbo POST
+mocksmith inject "GET /payments" --latency-ms 2000   # só latência, só GET
 mocksmith inject --list
-mocksmith inject --remove /payments
+mocksmith inject --remove "POST /payments"
 mocksmith inject --clear
 ```
 
@@ -482,47 +561,52 @@ mocksmith inject --clear
 ## Arquivo de configuração (`mocksmith.yaml`)
 
 Em vez de uma linha de comando gigante, declare tudo num YAML e rode com
-`--config`. Sem caminho, ele procura `mocksmith.yaml` no diretório atual; com
-caminho, usa o arquivo indicado.
+`--config <caminho>`. O `spec:` declarado é resolvido **relativo ao diretório do
+arquivo de config**.
 
 ```bash
-mocksmith run --config              # carrega ./mocksmith.yaml
-mocksmith run --config dev.yaml     # arquivo específico
+mocksmith run --config mocksmith.yaml            # arquivo no diretório atual
+mocksmith run --config examples/mocksmith.yaml   # caminho relativo/absoluto
 ```
 
 ```yaml
-spec: petstore.yaml          # caminho da spec (relativo ao cwd)
+spec: petstore.yaml          # caminho da spec (relativo ao diretório do config)
 addr: ":8080"
 profile: resilience          # happy | sad | resilience | chaos
 forceStatus: 0               # 0 = off
 
-# Comportamentos por endpoint (chave = template OpenAPI)
+# Comportamentos por endpoint (chave = "[MÉTODO ]path")
 endpoints:
-  /payments:
+  /payments:                 # qualquer método neste path
     fail: 503                # sempre 503
     slow: 800ms              # + 800ms de latência
   /pets:
     timeout: 20%             # 20% viram timeout (504)
     corrupt: 10%             # 10% recebem JSON malformado
-  /pets/{petId}:
+  GET /pets/{petId}:         # só o GET
     sequence: [404, 404, 200]  # 1ª/2ª → 404, 3ª+ → 200
+  DELETE /pets/{petId}:      # só o DELETE
+    fail: 409
 
 # Overrides iniciais da Admin API (estado de runtime no boot)
 overrides:
-  /users/{id}:
+  GET /users/{id}:           # chave também aceita "[MÉTODO ]path"
     status: 503
     latencyMs: 1000
     rate: 0.5                # opcional: fração afetada pelo status
 ```
 
-Campos de comportamento por endpoint: `fail` (int), `slow`/`timeout`/`corrupt`
-(strings, mesmas das flags), `sequence` (lista de int). O exemplo completo em
+Chave do endpoint/override: `"[MÉTODO ]path"` — sem método vale para qualquer
+verbo daquele path. Campos de comportamento: `fail` (int), `slow`/`timeout`/
+`corrupt` (strings, mesmas das flags), `sequence` (lista de int). O exemplo completo em
 [examples/mocksmith.yaml](examples/mocksmith.yaml) cobre todas as features sobre a
 spec rica [examples/shop-api.yaml](examples/shop-api.yaml) (26 endpoints, todos os
 métodos HTTP, formatos, arrays, aninhamento, enums, composição). Rode direto:
 
 ```bash
-cd examples && mocksmith run --config
+mocksmith run --config examples/mocksmith.yaml
+# ou, de dentro da pasta:
+cd examples && mocksmith run --config mocksmith.yaml
 ```
 
 **Precedência:** o config é a base; **as flags da CLI vencem**. Escalares
@@ -532,7 +616,7 @@ posicional ou do campo `spec:`. Chave desconhecida no YAML é erro.
 
 ```bash
 # config define profile: resilience, mas a flag força happy nesta execução
-mocksmith run --config --profile happy
+mocksmith run --config examples/mocksmith.yaml --profile happy
 ```
 
 ---
@@ -548,12 +632,12 @@ Sobe um servidor de mock a partir de uma spec OpenAPI.
 | `--addr`       | `:8080`   | Endereço em que o servidor escuta.              |
 | `--profile`    | `happy`   | Profile de runtime: `happy`, `sad`, `resilience`, `chaos` (ver [Profiles](#profiles)). |
 | `--force-status` | `0`     | Força esse status nos endpoints que o documentam; os demais seguem o profile (`0` = off). Ver [Forçar um status](#forçar-um-status---force-status). |
-| `--slow`       | —         | `[path=]duração`, ex.: `/pets=2s`. Repetível. Ver [Flags por endpoint](#flags-por-endpoint). |
-| `--fail`       | —         | `[path=]status`, ex.: `/payments=503`. Repetível. |
-| `--timeout`    | —         | `[path=]taxa`, ex.: `/auth=20%`. Repetível. |
-| `--corrupt`    | —         | `[path=]taxa`, ex.: `/users=10%`. Repetível. |
-| `--sequence`   | —         | `[path=]s1,s2,...`, ex.: `/jobs=202,202,200`. Repetível. Ver [Sequências stateful](#sequências-stateful---sequence). |
-| `--config`     | —         | Carrega um YAML de config; sem valor usa `mocksmith.yaml`. Ver [Arquivo de configuração](#arquivo-de-configuração-mocksmithyaml). |
+| `--slow`       | —         | `[[MÉTODO ]path=]duração`, ex.: `/pets=2s` ou `"POST /pets=2s"`. Repetível. Ver [Flags por endpoint](#flags-por-endpoint). |
+| `--fail`       | —         | `[[MÉTODO ]path=]status`, ex.: `"POST /payments=503"`. Repetível. |
+| `--timeout`    | —         | `[[MÉTODO ]path=]taxa`, ex.: `/auth=20%`. Repetível. |
+| `--corrupt`    | —         | `[[MÉTODO ]path=]taxa`, ex.: `/users=10%`. Repetível. |
+| `--sequence`   | —         | `[[MÉTODO ]path=]s1,s2,...`, ex.: `/jobs=202,202,200`. Repetível. Ver [Sequências stateful](#sequências-stateful---sequence). |
+| `--config`     | —         | Caminho de um YAML de config, ex.: `examples/mocksmith.yaml`. Ver [Arquivo de configuração](#arquivo-de-configuração-mocksmithyaml). |
 | `-h`, `--help` | —         | Ajuda do comando.                               |
 
 Com `--config`, o argumento `[spec]` é opcional (vem do campo `spec:`).
@@ -567,7 +651,7 @@ Muda o comportamento de um servidor em execução via [Admin API](#admin-api--ov
 | `--addr`       | `:8080`   | Endereço do servidor em execução.               |
 | `--latency-ms` | `0`       | Latência em milissegundos a injetar.            |
 | `--list`       | `false`   | Lista os overrides ativos.                      |
-| `--remove`     | —         | Remove o override de um path.                   |
+| `--remove`     | —         | Remove um override, `[MÉTODO ]path`, ex.: `"POST /payments"`. |
 | `--clear`      | `false`   | Remove todos os overrides.                      |
 
 ### Global
