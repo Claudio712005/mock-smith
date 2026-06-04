@@ -52,6 +52,93 @@ Profile: happy
 
 ---
 
+## Casos de uso
+
+O ponto forte do MockSmith é **desbloquear o desenvolvimento quando o serviço do
+qual você depende ainda não existe, está incompleto ou está fora do ar** — e
+ainda permitir testar como o *seu* serviço reage a falhas dele.
+
+### 1. O microsserviço de que você depende ainda não foi escrito
+
+Os times de front e back combinam o contrato OpenAPI primeiro. Com a spec em mãos,
+suba o mock e desenvolva contra ele **no mesmo dia**, sem esperar a implementação.
+
+```bash
+# time de pagamentos só entregou o contrato; você já consome
+mocksmith run payments-api.yaml --addr :9000
+curl -X POST localhost:9000/payments   # resposta realista, gerada do schema
+```
+
+Quando o serviço real ficar pronto, é só trocar a URL — o contrato é o mesmo.
+
+### 2. A dependência existe, mas está instável ou indisponível
+
+Em vez de travar quando a API de terceiros cai (ou tem rate limit no ambiente de
+dev), aponte para o mock e siga trabalhando — inclusive reproduzindo a
+instabilidade dela.
+
+```bash
+# 90% ok, 5% timeout, 5% 503 — como um serviço meia-boca de verdade
+mocksmith run partner-api.yaml --profile resilience
+
+# ou modele a falha exata que você viu: /auth cai 20% das vezes
+mocksmith run partner-api.yaml --timeout /auth=20% --slow /auth=800ms
+```
+
+### 3. Testar a resiliência do SEU serviço (retry, circuit breaker, fallback)
+
+Aponte seu serviço para o mock e force o downstream a falhar do jeito que você
+quer. Valida retry, timeout, circuit breaker e telas de fallback **sem tocar no
+código do downstream**.
+
+```bash
+# downstream sempre 503: seu circuit breaker deve abrir
+mocksmith run inventory-api.yaml --fail /stock=503
+
+# corpo corrompido em 10% das respostas: seu parser aguenta?
+mocksmith run inventory-api.yaml --corrupt /stock=10%
+
+# caos total: 1 em 5 requisições dá algo errado
+mocksmith run inventory-api.yaml --profile chaos
+```
+
+### 4. Fluxos assíncronos e polling (job que processa e depois conclui)
+
+Endpoints de status que respondem `202 Accepted` algumas vezes e depois `200 OK`
+são chatos de mockar à mão. Com `--sequence` é uma linha.
+
+```bash
+# 1ª e 2ª chamada → 202 (processando), 3ª em diante → 200 (pronto)
+mocksmith run jobs-api.yaml --sequence /jobs/{id}=202,202,200
+```
+
+### 5. Reproduzir um incidente de produção — sem redeploy
+
+Aconteceu um `503` intermitente com latência alta num endpoint? Reproduza ao vivo,
+ajuste e desfaça, **sem reiniciar o mock**, via Admin API.
+
+```bash
+mocksmith run api.yaml &                              # mock rodando
+mocksmith inject "/payments:503(30%)" --latency-ms 2000   # injeta o incidente
+# ... investiga o comportamento do cliente ...
+mocksmith inject --clear                              # volta ao normal
+```
+
+### 6. Testes de integração no CI
+
+Suba o mock como dependência determinística do pipeline: sem rede externa, sem
+flakiness, comportamento controlado por flags.
+
+```bash
+mocksmith run api.yaml --addr :8080 &
+go test ./...            # seus testes batem no mock, não na internet
+```
+
+> Dica: combine flags por endpoint para montar cenários ricos numa linha só —
+> ex.: `--fail /payments=503 --slow /pets=1s --sequence /jobs=202,202,200`.
+
+---
+
 ## Profiles
 
 O `--profile` define a distribuição de comportamentos por requisição. Os pesos
