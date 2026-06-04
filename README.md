@@ -19,16 +19,6 @@ Loaded 23 endpoints
 Profile: happy
 ```
 
-> Status: **Fase 6**. Carrega a spec, descobre os endpoints e serve respostas
-> guiadas por um **profile de runtime** (`happy`, `sad`, `resilience`, `chaos`) —
-> sucesso, erro de negócio, erro de servidor, timeout, corpo malformado e
-> desconexão. Um **pipeline de interceptors** compõe comportamentos sobre o
-> profile, configuráveis **por endpoint** via flags (`--slow`, `--fail`,
-> `--timeout`, `--corrupt`), incluindo **sequências stateful** (`--sequence`).
-> Uma **Admin API** muda o comportamento **em runtime, sem restart**
-> (`mocksmith inject`). Tudo isso cabe num **arquivo `mocksmith.yaml`**
-> (`run --config`). Dashboard no roadmap abaixo.
-
 ---
 
 ## Funcionalidades (atuais)
