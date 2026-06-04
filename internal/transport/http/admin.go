@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Claudio712005/mock-smith/internal/domain"
+	"github.com/Claudio712005/mock-smith/internal/interceptor"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -35,9 +36,95 @@ type endpointDetail struct {
 	Errors      []responseInfo `json:"errors,omitempty"`
 }
 
-func registerAdmin(r chi.Router, endpoints []domain.Endpoint) {
+func registerAdmin(r chi.Router, endpoints []domain.Endpoint, overrides *interceptor.Overrides) {
 	r.Get(adminPrefix+"/endpoints", listEndpointsHandler(endpoints))
 	r.Get(adminPrefix+"/endpoint", getEndpointHandler(endpoints))
+	r.Get(adminPrefix+"/runtime", listRuntimeHandler(overrides))
+	r.Post(adminPrefix+"/runtime", setRuntimeHandler(endpoints, overrides))
+	r.Delete(adminPrefix+"/runtime", deleteRuntimeHandler(overrides))
+}
+
+type runtimeRequest struct {
+	Endpoint  string  `json:"endpoint"`
+	Status    int     `json:"status"`
+	LatencyMs int     `json:"latencyMs"`
+	Rate      float64 `json:"rate"`
+}
+
+func listRuntimeHandler(overrides *interceptor.Overrides) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		snap := overrides.Snapshot()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"count":     len(snap),
+			"overrides": snap,
+		})
+	}
+}
+
+func setRuntimeHandler(endpoints []domain.Endpoint, overrides *interceptor.Overrides) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		var body runtimeRequest
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if body.Endpoint == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "field 'endpoint' is required"})
+			return
+		}
+		if !pathExists(endpoints, body.Endpoint) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no endpoint with path " + body.Endpoint})
+			return
+		}
+		if body.Status != 0 && (body.Status < 100 || body.Status > 599) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be 0 or a valid HTTP status (100-599)"})
+			return
+		}
+		if body.LatencyMs < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "latencyMs must be >= 0"})
+			return
+		}
+		if body.Rate < 0 || body.Rate > 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "rate must be between 0 and 1"})
+			return
+		}
+		if body.Status == 0 && body.LatencyMs == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "set at least one of 'status' or 'latencyMs'"})
+			return
+		}
+
+		ov := interceptor.Override{Status: body.Status, LatencyMs: body.LatencyMs, Rate: body.Rate}
+		overrides.Set(body.Endpoint, ov)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"endpoint": body.Endpoint,
+			"override": ov,
+		})
+	}
+}
+
+func deleteRuntimeHandler(overrides *interceptor.Overrides) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		path := req.URL.Query().Get("endpoint")
+		if path == "" {
+			n := overrides.Clear()
+			writeJSON(w, http.StatusOK, map[string]any{"cleared": n})
+			return
+		}
+		if !overrides.Delete(path) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no override for " + path})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": path})
+	}
+}
+
+func pathExists(endpoints []domain.Endpoint, path string) bool {
+	for _, ep := range endpoints {
+		if ep.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 func listEndpointsHandler(endpoints []domain.Endpoint) http.HandlerFunc {

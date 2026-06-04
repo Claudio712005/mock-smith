@@ -136,3 +136,15 @@ func TestNew_Corrupt_Invalid(t *testing.T) {
 		t.Fatal("New(corrupt rate>100%) expected error, got nil")
 	}
 }
+
+func TestNew_Sequence_Valid(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Sequence: []string{"/ping=202,202,200"}}); err != nil {
+		t.Fatalf("New(sequence) error = %v", err)
+	}
+}
+
+func TestNew_Sequence_Invalid(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Sequence: []string{"/ping=202,abc"}}); err == nil {
+		t.Fatal("New(sequence bad) expected error, got nil")
+	}
+}

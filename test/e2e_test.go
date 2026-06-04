@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -271,6 +272,85 @@ func TestE2E_ScopedFail_OnlyTargetEndpoint(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("/pets status = %d, want 200 (out of scope)", resp2.StatusCode)
+	}
+}
+
+func TestE2E_Sequence_AdvancesThenSticks(t *testing.T) {
+	chain := interceptor.Chain{interceptor.ScopedInterceptor{
+		Path:  "/payments",
+		Inner: &interceptor.SequenceInterceptor{Statuses: []int{503, 503, 201}},
+	}}
+	srv := httptransport.New(":0", loadEndpoints(t), nil, chain)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	post := func() int {
+		resp, err := ts.Client().Post(ts.URL+"/payments", "application/json", nil)
+		if err != nil {
+			t.Fatalf("POST /payments: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// 201 is the documented success for POST /payments.
+	want := []int{503, 503, 201, 201}
+	for i, w := range want {
+		if got := post(); got != w {
+			t.Fatalf("request %d → %d, want %d", i+1, got, w)
+		}
+	}
+
+	// Out-of-scope endpoint untouched.
+	resp := getJSON(t, ts, "/pets", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/pets status = %d, want 200 (out of scope)", resp.StatusCode)
+	}
+}
+
+func TestE2E_AdminRuntime_OverrideAndRestore(t *testing.T) {
+	ts := startServer(t)
+
+	runtime := ts.URL + "/__mocksmith/runtime"
+
+	// Baseline: /payments returns its documented success (201).
+	if resp, _ := ts.Client().Post(ts.URL+"/payments", "application/json", nil); resp != nil {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("baseline /payments = %d, want 201", resp.StatusCode)
+		}
+	}
+
+	// Inject a 503 override at runtime.
+	body, _ := json.Marshal(map[string]any{"endpoint": "/payments", "status": 503})
+	set, err := ts.Client().Post(runtime, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST runtime: %v", err)
+	}
+	set.Body.Close()
+	if set.StatusCode != http.StatusOK {
+		t.Fatalf("set override = %d, want 200", set.StatusCode)
+	}
+
+	resp, _ := ts.Client().Post(ts.URL+"/payments", "application/json", nil)
+	resp.Body.Close()
+	if resp.StatusCode != 503 {
+		t.Fatalf("after override /payments = %d, want 503", resp.StatusCode)
+	}
+
+	// Remove the override; behavior restores without restart.
+	req, _ := http.NewRequest(http.MethodDelete, runtime+"?endpoint=/payments", nil)
+	del, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("DELETE runtime: %v", err)
+	}
+	del.Body.Close()
+
+	resp2, _ := ts.Client().Post(ts.URL+"/payments", "application/json", nil)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusCreated {
+		t.Fatalf("after delete /payments = %d, want 201 (restored)", resp2.StatusCode)
 	}
 }
 

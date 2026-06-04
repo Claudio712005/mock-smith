@@ -62,7 +62,35 @@ func buildChain(opts Options) (interceptor.Chain, error) {
 		})
 	}
 
+	for _, entry := range opts.Sequence {
+		path, value := splitTarget(entry)
+		statuses, err := parseStatuses(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --sequence %q (want [path=]s1,s2,..., e.g. /jobs=202,202,200)", entry)
+		}
+		chain = append(chain, interceptor.ScopedInterceptor{
+			Path:  path,
+			Inner: &interceptor.SequenceInterceptor{Statuses: statuses},
+		})
+	}
+
 	return chain, nil
+}
+
+func parseStatuses(s string) ([]int, error) {
+	parts := strings.Split(s, ",")
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		status, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil || status < 100 || status > 599 {
+			return nil, fmt.Errorf("invalid status %q", p)
+		}
+		out = append(out, status)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("empty sequence")
+	}
+	return out, nil
 }
 
 func splitTarget(s string) (path, value string) {

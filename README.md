@@ -19,12 +19,14 @@ Loaded 23 endpoints
 Profile: happy
 ```
 
-> Status: **Fase 4**. Carrega a spec, descobre os endpoints e serve respostas
+> Status: **Fase 6**. Carrega a spec, descobre os endpoints e serve respostas
 > guiadas por um **profile de runtime** (`happy`, `sad`, `resilience`, `chaos`) —
 > sucesso, erro de negócio, erro de servidor, timeout, corpo malformado e
 > desconexão. Um **pipeline de interceptors** compõe comportamentos sobre o
 > profile, configuráveis **por endpoint** via flags (`--slow`, `--fail`,
-> `--timeout`, `--corrupt`). Cenários stateful no roadmap abaixo.
+> `--timeout`, `--corrupt`), incluindo **sequências stateful** (`--sequence`).
+> Uma **Admin API** muda o comportamento **em runtime, sem restart**
+> (`mocksmith inject`). Dashboard no roadmap abaixo.
 
 ---
 
@@ -44,6 +46,9 @@ Profile: happy
   desconexão da conexão. Veja [Profiles](#profiles).
 - **Resposta de sucesso** — a documentada (menor 2xx), ou `204` quando nenhuma
   é documentada. Prioridade do corpo descrita acima.
+- **Admin API em runtime** — sobrescreve status/latência por endpoint sem
+  reiniciar, via `/__mocksmith/runtime` ou `mocksmith inject`. Veja
+  [Admin API](#admin-api--overrides-em-runtime).
 
 ---
 
@@ -155,8 +160,25 @@ mocksmith run examples/petstore.yaml \
 mocksmith run examples/petstore.yaml --slow 300ms --fail /payments=503
 ```
 
-> `--retry`/`--sequence` (respostas em sequência, ex.: `202,202,200`) precisam de
-> estado por endpoint e ficam para a Fase 5 — ver [PLAN.md](PLAN.md).
+### Sequências stateful (`--sequence`)
+
+`--sequence [path=]s1,s2,...` devolve os status **em ordem, um por requisição** ao
+endpoint. Esgotada a lista, **fixa no último** — ideal para polling (ex.: job que
+fica `202 Accepted` e depois `200 OK`). É stateful por endpoint, com contador
+seguro para concorrência.
+
+```bash
+# 1ª req → 202, 2ª → 202, 3ª em diante → 200
+mocksmith run examples/petstore.yaml --sequence /jobs=202,202,200
+```
+
+O status escolhido é renderizado como a resposta da spec: igual ao sucesso
+documentado do endpoint usa o corpo de sucesso; um erro documentado usa o corpo
+daquele erro; senão, um corpo JSON genérico com o status. Flag repetível; cada
+status deve estar em `100–599`.
+
+> Combinar duas flags que sobrescrevem o status no mesmo endpoint (ex.: `--fail`
+> + `--sequence`) faz a última da chain vencer.
 
 ---
 
@@ -323,6 +345,52 @@ Respostas:
 
 ---
 
+## Admin API — overrides em runtime
+
+Mude o comportamento de um endpoint **sem reiniciar** o servidor, via rotas sob
+`/__mocksmith/runtime`. Um override sobrepõe o profile e as flags estáticas e
+vale até ser removido.
+
+### `POST /__mocksmith/runtime` — define um override
+
+```json
+{ "endpoint": "/payments", "status": 503, "latencyMs": 2000, "rate": 0.2 }
+```
+
+| Campo       | Obrigatório | Descrição                                                     |
+|-------------|-------------|---------------------------------------------------------------|
+| `endpoint`  | sim         | Path do template OpenAPI (ex.: `/pets/{petId}`). Deve existir. |
+| `status`    | —           | Status HTTP a forçar (`100–599`). Igual ao sucesso documentado usa o corpo de sucesso. |
+| `latencyMs` | —           | Atraso em milissegundos antes de responder.                   |
+| `rate`      | —           | Fração `0–1` das requisições afetadas pelo `status` (vazio/`0` = sempre). |
+
+Pelo menos um de `status` ou `latencyMs`. `POST` **substitui** o override inteiro
+do endpoint — combine status e latência numa só chamada. Respostas: `200` (ok),
+`400` (corpo/valores inválidos), `404` (endpoint inexistente).
+
+### `GET /__mocksmith/runtime` — lista os overrides ativos
+
+### `DELETE /__mocksmith/runtime` — remove
+
+- `?endpoint=/payments` remove um (`404` se não existir);
+- sem query, limpa todos e devolve `{ "cleared": N }`.
+
+### CLI `mocksmith inject`
+
+Atalho que conversa com a Admin API de um servidor rodando (`--addr`, padrão
+`:8080`).
+
+```bash
+mocksmith inject "/payments:503(20%)"        # 20% das req → 503
+mocksmith inject "/payments:503" --latency-ms 2000
+mocksmith inject /payments --latency-ms 2000 # só latência
+mocksmith inject --list
+mocksmith inject --remove /payments
+mocksmith inject --clear
+```
+
+---
+
 ## Comandos & flags
 
 ### `mocksmith run <spec>`
@@ -338,7 +406,20 @@ Sobe um servidor de mock a partir de uma spec OpenAPI.
 | `--fail`       | —         | `[path=]status`, ex.: `/payments=503`. Repetível. |
 | `--timeout`    | —         | `[path=]taxa`, ex.: `/auth=20%`. Repetível. |
 | `--corrupt`    | —         | `[path=]taxa`, ex.: `/users=10%`. Repetível. |
+| `--sequence`   | —         | `[path=]s1,s2,...`, ex.: `/jobs=202,202,200`. Repetível. Ver [Sequências stateful](#sequências-stateful---sequence). |
 | `-h`, `--help` | —         | Ajuda do comando.                               |
+
+### `mocksmith inject [...]`
+
+Muda o comportamento de um servidor em execução via [Admin API](#admin-api--overrides-em-runtime).
+
+| Flag           | Padrão    | Descrição                                       |
+|----------------|-----------|-------------------------------------------------|
+| `--addr`       | `:8080`   | Endereço do servidor em execução.               |
+| `--latency-ms` | `0`       | Latência em milissegundos a injetar.            |
+| `--list`       | `false`   | Lista os overrides ativos.                      |
+| `--remove`     | —         | Remove o override de um path.                   |
+| `--clear`      | `false`   | Remove todos os overrides.                      |
 
 ### Global
 

@@ -75,6 +75,9 @@ func TestBuildChain_Errors(t *testing.T) {
 		{"timeout over 100%", Options{Timeout: []string{"/x=120%"}}},
 		{"corrupt over 1", Options{Corrupt: []string{"/x=2"}}},
 		{"corrupt empty", Options{Corrupt: []string{"/x="}}},
+		{"sequence empty", Options{Sequence: []string{"/x="}}},
+		{"sequence non-numeric", Options{Sequence: []string{"/x=202,abc"}}},
+		{"sequence out of range", Options{Sequence: []string{"/x=202,42"}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,6 +85,39 @@ func TestBuildChain_Errors(t *testing.T) {
 				t.Fatalf("buildChain(%+v) expected error, got nil", tc.opts)
 			}
 		})
+	}
+}
+
+func TestBuildChain_Sequence(t *testing.T) {
+	chain, err := buildChain(Options{Sequence: []string{"/jobs=202,202,200"}})
+	if err != nil {
+		t.Fatalf("buildChain error = %v", err)
+	}
+	scoped := chain[0].(interceptor.ScopedInterceptor)
+	if scoped.Path != "/jobs" {
+		t.Fatalf("path = %q, want /jobs", scoped.Path)
+	}
+	seq, ok := scoped.Inner.(*interceptor.SequenceInterceptor)
+	if !ok {
+		t.Fatalf("inner = %T, want *SequenceInterceptor", scoped.Inner)
+	}
+	if len(seq.Statuses) != 3 || seq.Statuses[0] != 202 || seq.Statuses[2] != 200 {
+		t.Fatalf("statuses = %v, want [202 202 200]", seq.Statuses)
+	}
+}
+
+func TestParseStatuses(t *testing.T) {
+	got, err := parseStatuses("202, 202 ,200")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if len(got) != 3 || got[0] != 202 || got[2] != 200 {
+		t.Fatalf("got %v, want [202 202 200]", got)
+	}
+	for _, bad := range []string{"", "202,abc", "202,42", "700"} {
+		if _, err := parseStatuses(bad); err == nil {
+			t.Errorf("parseStatuses(%q) expected error", bad)
+		}
 	}
 }
 

@@ -23,6 +23,7 @@ type Options struct {
 	Fail        []string
 	Timeout     []string
 	Corrupt     []string
+	Sequence    []string
 }
 
 // Runtime guarda os endpoints carregados e os serve via HTTP.

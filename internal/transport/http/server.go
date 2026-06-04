@@ -32,12 +32,15 @@ func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario, chain
 		scen = defaultScenario
 	}
 
+	overrides := interceptor.NewOverrides()
+	chain = append(chain, interceptor.NewOverrideInterceptor(overrides))
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	registerAdmin(r, endpoints)
+	registerAdmin(r, endpoints, overrides)
 
 	for _, ep := range endpoints {
 		r.MethodFunc(ep.Method, ep.Path, makeHandler(ep, scen, chain))
