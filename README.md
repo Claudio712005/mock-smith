@@ -752,12 +752,21 @@ go test ./test/...
 ### CI
 
 Toda push/PR para `main` dispara o workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
-que roda no Go 1.26.3:
+no último patch do Go 1.26 (`1.26.x`), em dois jobs paralelos:
+
+**`build & test`**
 
 1. **gofmt** — falha se houver arquivo não formatado.
 2. **`go vet ./...`** — análise estática.
 3. **`go test -race -coverprofile`** — testes com race detector e cobertura.
 4. **`go build`** — garante que o binário compila.
+
+**`vulnerability scan`**
+
+5. **`govulncheck ./...`** — scanner oficial do Go. Confere as dependências e a
+   biblioteca padrão contra a base de vulnerabilidades do Go. É *call-graph
+   aware*: só falha em vulnerabilidades que o código realmente alcança, então o
+   ruído é baixo. O toolchain em `1.26.x` mantém os fixes de stdlib em dia.
 
 Antes de abrir PR, rode localmente o mesmo conjunto:
 
@@ -766,6 +775,10 @@ gofmt -l .          # deve sair vazio
 go vet ./...
 go test -race ./...
 go build -o mocksmith ./cmd/mocksmith
+
+# scanner de vulnerabilidades (instala uma vez)
+go install golang.org/x/vuln/cmd/govulncheck@latest
+govulncheck ./...
 ```
 
 ---
