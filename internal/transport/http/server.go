@@ -26,13 +26,17 @@ var defaultScenario = scenario.Always(scenario.Result{Kind: scenario.KindSuccess
 // endpoint. Os templates OpenAPI ("/users/{id}") já casam com a sintaxe do chi.
 // O scenario decide o comportamento de cada requisição; nil equivale a happy
 // (sempre sucesso). A chain de interceptors é aplicada antes da escrita da
-// resposta. Não inicia o servidor; use ListenAndServe.
-func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario, chain interceptor.Chain) *Server {
+// resposta. initialOverrides semeia o estado da Admin API (nil = vazio). Não
+// inicia o servidor; use ListenAndServe.
+func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario, chain interceptor.Chain, initialOverrides map[string]interceptor.Override) *Server {
 	if scen == nil {
 		scen = defaultScenario
 	}
 
 	overrides := interceptor.NewOverrides()
+	for path, ov := range initialOverrides {
+		overrides.Set(path, ov)
+	}
 	chain = append(chain, interceptor.NewOverrideInterceptor(overrides))
 
 	r := chi.NewRouter()

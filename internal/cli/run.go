@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Claudio712005/mock-smith/internal/app"
+	"github.com/Claudio712005/mock-smith/internal/config"
 	"github.com/Claudio712005/mock-smith/internal/scenario"
 	"github.com/spf13/cobra"
 )
@@ -18,29 +20,55 @@ func newRunCmd() *cobra.Command {
 		timeout     []string
 		corrupt     []string
 		sequence    []string
+		configPath  string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "run <spec>",
+		Use:   "run [spec]",
 		Short: "Start a mock server from an OpenAPI spec",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		Example: "  mocksmith run openapi.yaml\n" +
 			"  mocksmith run openapi.yaml --addr :9090\n" +
 			"  mocksmith run openapi.yaml --slow /payments=2s --fail /auth=503\n" +
-			"  mocksmith run openapi.yaml --timeout /jobs=20% --corrupt /users=10%\n" +
-			"  mocksmith run openapi.yaml --sequence /jobs=202,202,200",
-		RunE: func(_ *cobra.Command, args []string) error {
-			rt, err := app.New(app.Options{
-				SpecPath:    args[0],
-				Addr:        addr,
-				Profile:     profile,
-				ForceStatus: forceStatus,
-				Slow:        slow,
-				Fail:        fail,
-				Timeout:     timeout,
-				Corrupt:     corrupt,
-				Sequence:    sequence,
-			})
+			"  mocksmith run openapi.yaml --sequence /jobs=202,202,200\n" +
+			"  mocksmith run --config            # loads ./mocksmith.yaml\n" +
+			"  mocksmith run --config dev.yaml",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var opts app.Options
+			if cmd.Flags().Changed("config") {
+				cfg, err := config.Load(configPath)
+				if err != nil {
+					return err
+				}
+				opts = cfg.ToOptions()
+			}
+
+			if cmd.Flags().Changed("addr") || opts.Addr == "" {
+				opts.Addr = addr
+			}
+			if cmd.Flags().Changed("profile") || opts.Profile == "" {
+				opts.Profile = profile
+			}
+			if cmd.Flags().Changed("force-status") {
+				opts.ForceStatus = forceStatus
+			}
+
+			spec := opts.SpecPath
+			if len(args) > 0 {
+				spec = args[0]
+			}
+			if spec == "" {
+				return fmt.Errorf("no spec given: pass it as an argument or set 'spec' in the config file")
+			}
+			opts.SpecPath = spec
+
+			opts.Slow = append(opts.Slow, slow...)
+			opts.Fail = append(opts.Fail, fail...)
+			opts.Timeout = append(opts.Timeout, timeout...)
+			opts.Corrupt = append(opts.Corrupt, corrupt...)
+			opts.Sequence = append(opts.Sequence, sequence...)
+
+			rt, err := app.New(opts)
 			if err != nil {
 				return err
 			}
@@ -63,5 +91,8 @@ func newRunCmd() *cobra.Command {
 		"corrupt the JSON body at a rate, [path=]rate, e.g. /users=10% (repeatable)")
 	cmd.Flags().StringArrayVar(&sequence, "sequence", nil,
 		"return statuses in order per request, [path=]s1,s2,..., e.g. /jobs=202,202,200 (repeatable)")
+	cmd.Flags().StringVar(&configPath, "config", "",
+		"load behavior from a YAML config file (default "+config.DefaultFile+")")
+	cmd.Flags().Lookup("config").NoOptDefVal = config.DefaultFile
 	return cmd
 }

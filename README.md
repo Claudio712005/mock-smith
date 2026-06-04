@@ -26,7 +26,8 @@ Profile: happy
 > profile, configuráveis **por endpoint** via flags (`--slow`, `--fail`,
 > `--timeout`, `--corrupt`), incluindo **sequências stateful** (`--sequence`).
 > Uma **Admin API** muda o comportamento **em runtime, sem restart**
-> (`mocksmith inject`). Dashboard no roadmap abaixo.
+> (`mocksmith inject`). Tudo isso cabe num **arquivo `mocksmith.yaml`**
+> (`run --config`). Dashboard no roadmap abaixo.
 
 ---
 
@@ -478,6 +479,64 @@ mocksmith inject --clear
 
 ---
 
+## Arquivo de configuração (`mocksmith.yaml`)
+
+Em vez de uma linha de comando gigante, declare tudo num YAML e rode com
+`--config`. Sem caminho, ele procura `mocksmith.yaml` no diretório atual; com
+caminho, usa o arquivo indicado.
+
+```bash
+mocksmith run --config              # carrega ./mocksmith.yaml
+mocksmith run --config dev.yaml     # arquivo específico
+```
+
+```yaml
+spec: petstore.yaml          # caminho da spec (relativo ao cwd)
+addr: ":8080"
+profile: resilience          # happy | sad | resilience | chaos
+forceStatus: 0               # 0 = off
+
+# Comportamentos por endpoint (chave = template OpenAPI)
+endpoints:
+  /payments:
+    fail: 503                # sempre 503
+    slow: 800ms              # + 800ms de latência
+  /pets:
+    timeout: 20%             # 20% viram timeout (504)
+    corrupt: 10%             # 10% recebem JSON malformado
+  /pets/{petId}:
+    sequence: [404, 404, 200]  # 1ª/2ª → 404, 3ª+ → 200
+
+# Overrides iniciais da Admin API (estado de runtime no boot)
+overrides:
+  /users/{id}:
+    status: 503
+    latencyMs: 1000
+    rate: 0.5                # opcional: fração afetada pelo status
+```
+
+Campos de comportamento por endpoint: `fail` (int), `slow`/`timeout`/`corrupt`
+(strings, mesmas das flags), `sequence` (lista de int). O exemplo completo em
+[examples/mocksmith.yaml](examples/mocksmith.yaml) cobre todas as features sobre a
+spec rica [examples/shop-api.yaml](examples/shop-api.yaml) (26 endpoints, todos os
+métodos HTTP, formatos, arrays, aninhamento, enums, composição). Rode direto:
+
+```bash
+cd examples && mocksmith run --config
+```
+
+**Precedência:** o config é a base; **as flags da CLI vencem**. Escalares
+(`--addr`, `--profile`, `--force-status`) sobrescrevem; listas por endpoint
+(`--slow`, `--fail`, …) **somam** ao que veio do config. A `spec` pode vir do arg
+posicional ou do campo `spec:`. Chave desconhecida no YAML é erro.
+
+```bash
+# config define profile: resilience, mas a flag força happy nesta execução
+mocksmith run --config --profile happy
+```
+
+---
+
 ## Comandos & flags
 
 ### `mocksmith run <spec>`
@@ -494,7 +553,10 @@ Sobe um servidor de mock a partir de uma spec OpenAPI.
 | `--timeout`    | —         | `[path=]taxa`, ex.: `/auth=20%`. Repetível. |
 | `--corrupt`    | —         | `[path=]taxa`, ex.: `/users=10%`. Repetível. |
 | `--sequence`   | —         | `[path=]s1,s2,...`, ex.: `/jobs=202,202,200`. Repetível. Ver [Sequências stateful](#sequências-stateful---sequence). |
+| `--config`     | —         | Carrega um YAML de config; sem valor usa `mocksmith.yaml`. Ver [Arquivo de configuração](#arquivo-de-configuração-mocksmithyaml). |
 | `-h`, `--help` | —         | Ajuda do comando.                               |
+
+Com `--config`, o argumento `[spec]` é opcional (vem do campo `spec:`).
 
 ### `mocksmith inject [...]`
 
@@ -551,15 +613,16 @@ GOOS=windows GOARCH=amd64 go build -o mocksmith.exe ./cmd/mocksmith
 ```txt
 cmd/mocksmith/        ponto de entrada da CLI
 internal/
-  cli/                comandos cobra (root, run)
+  cli/                comandos cobra (root, run, inject)
   app/                wiring do runtime (carga → descoberta → serve)
+  config/             parse do mocksmith.yaml → Options
   openapi/            carga da spec + descoberta de endpoints
   scenario/           engine de profiles (sorteio de comportamento por peso)
   interceptor/        pipeline de comportamento (latência, falha, timeout, corrupção)
   transport/http/     servidor chi e handlers das requisições
   domain/             modelos Endpoint / ResponseSpec
   faker/              geração de dado falso a partir do schema
-examples/             specs de exemplo para teste
+examples/             specs de exemplo (petstore, shop-api, springboot-legacy) + mocksmith.yaml
 test/                 testes end-to-end (spec real → servidor HTTP vivo)
 .github/workflows/    pipeline de CI (build, lint, testes)
 ```
@@ -576,6 +639,7 @@ Bibliotecas diretas (ver [`go.mod`](go.mod) para versões exatas):
 | [`go-chi/chi/v5`](https://github.com/go-chi/chi) | `v5.3.0` | Roteador HTTP. Templates OpenAPI (`/users/{id}`) casam direto com a sintaxe do chi. Middlewares `RequestID`, `Logger`, `Recoverer`. Usada em `internal/transport/http`. |
 | [`spf13/cobra`](https://github.com/spf13/cobra) | `v1.10.2` | Framework de CLI: comando raiz `mocksmith`, subcomando `run`, flags e help. Usada em `internal/cli`. |
 | [`brianvoe/gofakeit/v7`](https://github.com/brianvoe/gofakeit) | `v7.15.0` | Geração de dado falso ciente de formato (email, uuid, uri, date/date-time, ipv4/ipv6, números, strings com bounds). Usada em `internal/faker`. |
+| [`gopkg.in/yaml.v3`](https://gopkg.in/yaml.v3) | `v3.0.1` | Parse do arquivo de config `mocksmith.yaml`. Usada em `internal/config`. |
 
 As demais entradas do `go.mod` são dependências **indiretas** (transitivas) puxadas pelas acima — não importadas direto pelo código.
 

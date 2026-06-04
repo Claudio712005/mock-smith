@@ -24,6 +24,7 @@ type Options struct {
 	Timeout     []string
 	Corrupt     []string
 	Sequence    []string
+	Overrides   map[string]interceptor.Override
 }
 
 // Runtime guarda os endpoints carregados e os serve via HTTP.
@@ -69,7 +70,7 @@ func New(opts Options) (*Runtime, error) {
 
 // Run inicia o servidor HTTP e bloqueia até ele parar.
 func (r *Runtime) Run() error {
-	srv := httptransport.New(r.opts.Addr, r.endpoints, r.scenario, r.chain)
+	srv := httptransport.New(r.opts.Addr, r.endpoints, r.scenario, r.chain, r.opts.Overrides)
 
 	fmt.Printf("MockSmith running on %s\n", r.opts.Addr)
 	fmt.Printf("Loaded %d endpoints\n", len(r.endpoints))
@@ -79,6 +80,9 @@ func (r *Runtime) Run() error {
 	}
 	if n := len(r.chain); n > 0 {
 		fmt.Printf("Active interceptors: %d\n", n)
+	}
+	if n := len(r.opts.Overrides); n > 0 {
+		fmt.Printf("Seeded %d runtime override(s)\n", n)
 	}
 
 	return srv.ListenAndServe()

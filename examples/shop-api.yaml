@@ -1,0 +1,712 @@
+openapi: 3.0.3
+info:
+  title: Shop API
+  description: >
+    Spec rica para exercitar o MockSmith — muitos endpoints, todos os métodos HTTP,
+    formatos de string variados, arrays com bounds, objetos aninhados, enums,
+    composição (allOf/oneOf/anyOf), exemplos e múltiplos status (2xx/4xx/5xx).
+  version: 2.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local
+
+tags:
+  - name: catalog
+  - name: users
+  - name: orders
+  - name: payments
+  - name: auth
+  - name: system
+
+paths:
+  # ---------- Catálogo ----------
+  /products:
+    get:
+      tags: [catalog]
+      operationId: listProducts
+      summary: List products
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/Category' } }
+      responses:
+        '200':
+          description: A page of products
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 5
+                maxItems: 5
+                items: { $ref: '#/components/schemas/Product' }
+    post:
+      tags: [catalog]
+      operationId: createProduct
+      summary: Create a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewProduct' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400':
+          description: Invalid payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: SKU already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /products/{productId}:
+    parameters:
+      - name: productId
+        in: path
+        required: true
+        schema: { type: integer, format: int64, minimum: 1 }
+    get:
+      tags: [catalog]
+      operationId: getProduct
+      summary: Get a product
+      responses:
+        '200':
+          description: A product
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      tags: [catalog]
+      operationId: replaceProduct
+      summary: Replace a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewProduct' }
+      responses:
+        '200':
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    patch:
+      tags: [catalog]
+      operationId: patchProduct
+      summary: Partially update a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                price: { type: number, format: double, minimum: 0 }
+                available: { type: boolean }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+    delete:
+      tags: [catalog]
+      operationId: deleteProduct
+      summary: Delete a product
+      responses:
+        '204': { description: Deleted }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /products/{productId}/reviews:
+    parameters:
+      - { name: productId, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [catalog]
+      operationId: listReviews
+      summary: List reviews of a product
+      responses:
+        '200':
+          description: Reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 2
+                items: { $ref: '#/components/schemas/Review' }
+    post:
+      tags: [catalog]
+      operationId: addReview
+      summary: Add a review
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Review' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Review' }
+        '422':
+          description: Unprocessable (rating out of range)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /categories:
+    get:
+      tags: [catalog]
+      operationId: listCategories
+      summary: List categories
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+
+  /search:
+    get:
+      tags: [catalog]
+      operationId: search
+      summary: Full-text search
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1 } }
+        - { name: sort, in: query, schema: { type: string, enum: [relevance, price_asc, price_desc] } }
+      responses:
+        '200':
+          description: Search hits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  hits:
+                    type: array
+                    items: { $ref: '#/components/schemas/Product' }
+
+  # ---------- Usuários ----------
+  /users:
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Register a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewUser' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400':
+          description: Invalid
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Email already in use
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /users/{userId}:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: Get a user (with media example)
+      responses:
+        '200':
+          description: A user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+              example:
+                id: "3f8a1c9e-2b4d-4f66-9a01-7c5e8b0d2345"
+                name: "Grace Hopper"
+                email: "grace@example.com"
+                role: "admin"
+                active: true
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [users]
+      operationId: deleteUser
+      summary: Delete a user
+      responses:
+        '204': { description: Deleted }
+
+  /users/{userId}/addresses:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [users]
+      operationId: listAddresses
+      summary: List a user's addresses
+      responses:
+        '200':
+          description: Addresses
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 1
+                items: { $ref: '#/components/schemas/Address' }
+
+  # ---------- Pedidos ----------
+  /orders:
+    post:
+      tags: [orders]
+      operationId: createOrder
+      summary: Create an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewOrder' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '402':
+          description: Payment required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /orders/{orderId}:
+    parameters:
+      - { name: orderId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [orders]
+      operationId: getOrder
+      summary: Get an order
+      responses:
+        '200':
+          description: An order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /orders/{orderId}/status:
+    parameters:
+      - { name: orderId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [orders]
+      operationId: getOrderStatus
+      summary: Poll order processing status
+      responses:
+        '200':
+          description: Current status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orderId, status]
+                properties:
+                  orderId: { type: string, format: uuid }
+                  status: { type: string, enum: [pending, processing, shipped, delivered] }
+                  updatedAt: { type: string, format: date-time }
+
+  /orders/{orderId}/cancel:
+    parameters:
+      - { name: orderId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [orders]
+      operationId: cancelOrder
+      summary: Cancel an order
+      responses:
+        '200':
+          description: Cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '409':
+          description: Cannot cancel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ---------- Pagamentos ----------
+  /payments:
+    post:
+      tags: [payments]
+      operationId: createPayment
+      summary: Charge a payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, amount, method]
+              properties:
+                orderId: { type: string, format: uuid }
+                amount: { $ref: '#/components/schemas/Money' }
+                method: { type: string, enum: [card, pix, boleto, paypal] }
+      responses:
+        '201':
+          description: Charged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '402':
+          description: Declined
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Provider unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /payments/{paymentId}:
+    parameters:
+      - { name: paymentId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [payments]
+      operationId: getPayment
+      summary: Get a payment
+      responses:
+        '200':
+          description: A payment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+
+  # ---------- Auth ----------
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Log in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password, minLength: 8 }
+      responses:
+        '200':
+          description: Token issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Token' }
+        '401':
+          description: Bad credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refreshToken
+      summary: Refresh a token
+      responses:
+        '200':
+          description: New token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Token' }
+        '401':
+          description: Expired
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ---------- Sistema ----------
+  /inventory/{sku}:
+    parameters:
+      - { name: sku, in: path, required: true, schema: { type: string, pattern: '^[A-Z]{3}-[0-9]{4}$' } }
+    get:
+      tags: [system]
+      operationId: getInventory
+      summary: Stock for a SKU
+      responses:
+        '200':
+          description: Stock level
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sku: { type: string }
+                  inStock: { type: integer, minimum: 0, maximum: 9999 }
+                  warehouses:
+                    type: array
+                    items: { type: string }
+        '404':
+          description: Unknown SKU
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /files/{fileId}:
+    parameters:
+      - { name: fileId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [system]
+      operationId: getFile
+      summary: File metadata (byte-encoded blob)
+      responses:
+        '200':
+          description: File
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  filename: { type: string }
+                  size: { type: integer, format: int64 }
+                  checksum: { type: string, format: byte }
+                  url: { type: string, format: uri }
+
+  /webhooks/test:
+    post:
+      tags: [system]
+      operationId: testWebhook
+      summary: Fire a test webhook (async)
+      responses:
+        '202': { description: Accepted for processing }
+
+  /health:
+    get:
+      tags: [system]
+      operationId: health
+      summary: Liveness probe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+                  uptimeSeconds: { type: integer, format: int64 }
+
+components:
+  schemas:
+    Category:
+      type: string
+      enum: [electronics, books, clothing, home, toys, grocery]
+
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: number, format: double, minimum: 0, maximum: 1000000, example: 199.9 }
+        currency: { type: string, enum: [USD, EUR, BRL, GBP] }
+
+    Product:
+      type: object
+      required: [id, name, price, category, status]
+      properties:
+        id: { type: integer, format: int64, example: 1042 }
+        legacyId:
+          anyOf:
+            - { type: integer }
+            - { type: string }
+        name: { type: string, example: "Mechanical Keyboard" }
+        description: { type: string, maxLength: 280 }
+        sku: { type: string, pattern: '^[A-Z]{3}-[0-9]{4}$', example: "KEY-0042" }
+        price: { $ref: '#/components/schemas/Money' }
+        category: { $ref: '#/components/schemas/Category' }
+        status: { type: string, enum: [available, out_of_stock, discontinued] }
+        rating: { type: number, format: float, minimum: 0, maximum: 5 }
+        available: { type: boolean }
+        photoUrls:
+          type: array
+          minItems: 1
+          maxItems: 4
+          items: { type: string, format: uri }
+        tags:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    NewProduct:
+      type: object
+      required: [name, price, category]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        price: { $ref: '#/components/schemas/Money' }
+        category: { $ref: '#/components/schemas/Category' }
+        tags:
+          type: array
+          items: { type: string }
+
+    Review:
+      type: object
+      required: [author, rating]
+      properties:
+        author: { type: string }
+        rating: { type: integer, minimum: 1, maximum: 5, example: 4 }
+        comment: { type: string, maxLength: 500 }
+        createdAt: { type: string, format: date }
+
+    User:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [admin, member, guest], default: member }
+        active: { type: boolean }
+        website: { type: string, format: uri }
+        lastLoginIp: { type: string, format: ipv4 }
+        lastLoginIpv6: { type: string, format: ipv6 }
+        host: { type: string, format: hostname }
+        birthDate: { type: string, format: date }
+        createdAt: { type: string, format: date-time }
+        addresses:
+          type: array
+          items: { $ref: '#/components/schemas/Address' }
+
+    NewUser:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, minLength: 1 }
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 8, maxLength: 64 }
+
+    Address:
+      type: object
+      required: [street, city, country]
+      properties:
+        label: { type: string, enum: [home, work, other] }
+        street: { type: string }
+        number: { type: integer, minimum: 0 }
+        city: { type: string }
+        zip: { type: string }
+        country: { type: string, minLength: 2, maxLength: 2, example: "BR" }
+        geo:
+          type: object
+          properties:
+            lat: { type: number, format: double, minimum: -90, maximum: 90 }
+            lng: { type: number, format: double, minimum: -180, maximum: 180 }
+
+    OrderItem:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: { type: integer, format: int64 }
+        quantity: { type: integer, minimum: 1, maximum: 999 }
+        unitPrice: { $ref: '#/components/schemas/Money' }
+
+    NewOrder:
+      type: object
+      required: [userId, items]
+      properties:
+        userId: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/OrderItem' }
+        coupon: { type: string }
+
+    Order:
+      type: object
+      required: [id, status, total, items]
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        status: { type: string, enum: [pending, processing, shipped, delivered, cancelled] }
+        total: { $ref: '#/components/schemas/Money' }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/OrderItem' }
+        payment:
+          oneOf:
+            - { $ref: '#/components/schemas/Payment' }
+            - { type: string, format: uuid, description: "payment id only" }
+        createdAt: { type: string, format: date-time }
+
+    Payment:
+      type: object
+      required: [id, status, amount]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/Money' }
+        method: { type: string, enum: [card, pix, boleto, paypal] }
+        status: { type: string, enum: [pending, authorized, captured, declined, refunded] }
+        processedAt: { type: string, format: date-time }
+
+    Token:
+      type: object
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken: { type: string, format: byte }
+        refreshToken: { type: string, format: byte }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, format: int32, example: 3600 }
+
+    Error:
+      allOf:
+        - type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+        - type: object
+          properties:
+            details:
+              type: array
+              items: { type: string }
+            traceId: { type: string, format: uuid }

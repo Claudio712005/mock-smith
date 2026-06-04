@@ -1,0 +1,94 @@
+# =============================================================================
+# MockSmith — arquivo de configuração de exemplo (completo)
+#
+# Rode a partir deste diretório:   mocksmith run --config
+# Ou aponte para o arquivo:        mocksmith run --config examples/mocksmith.yaml
+#
+# Flags da CLI SOBREPÕEM este arquivo:
+#   - escalares (--addr, --profile, --force-status) vencem
+#   - listas por endpoint (--slow, --fail, ...) SOMAM ao que está aqui
+# Chave desconhecida no YAML = erro (pega typo).
+# =============================================================================
+
+# Caminho da spec OpenAPI (relativo ao diretório onde o comando roda).
+spec: shop-api.yaml
+
+# Endereço de escuta.
+addr: ":8080"
+
+# Profile base de runtime, aplicado a TODO endpoint que não tem regra própria.
+#   happy      → 100% sucesso
+#   sad        → 70% sucesso / 30% erro de negócio
+#   resilience → 90% sucesso / 5% timeout / 5% 503
+#   chaos      → 80% ok / 5% malformado / 5% timeout / 5% desconexão / 5% 500
+profile: resilience
+
+# Força um status nos endpoints que o documentam (0 = desligado).
+# Ex.: 503 faria todo endpoint com 503 mapeado responder 503.
+forceStatus: 0
+
+# -----------------------------------------------------------------------------
+# Comportamentos por endpoint.
+# Chave = template OpenAPI exato (igual ao que aparece em /__mocksmith/endpoints).
+# Campos: fail (int) | slow (duração) | timeout (taxa) | corrupt (taxa) | sequence ([int])
+# -----------------------------------------------------------------------------
+endpoints:
+
+  # Pagamento sempre indisponível + lento (simula provider fora do ar).
+  /payments:
+    fail: 503
+    slow: 1200ms
+
+  # Listagem de produtos: instável e às vezes corrompida.
+  /products:
+    timeout: 15%      # 15% das requisições viram timeout (504)
+    corrupt: 5%       # 5% recebem corpo JSON malformado
+
+  # Detalhe de produto: só latência (serviço lento, mas correto).
+  /products/{productId}:
+    slow: 400ms
+
+  # Busca: bem lenta (índice pesado).
+  /search:
+    slow: 1500ms
+
+  # Login: às vezes trava (timeout no auth).
+  /auth/login:
+    timeout: 30%
+
+  # Estoque: payload frequentemente corrompido (serviço legado).
+  /inventory/{sku}:
+    corrupt: 20%
+
+  # Criação de pedido: 1ª tentativa recusada (402), 2ª em diante aceita (201).
+  /orders:
+    sequence: [402, 201]
+
+  # Polling de status: "processando" duas vezes (202), depois pronto (200).
+  /orders/{orderId}/status:
+    sequence: [202, 202, 200]
+
+  # Reviews: caos pontual de servidor.
+  /products/{productId}/reviews:
+    fail: 500
+
+# -----------------------------------------------------------------------------
+# Overrides iniciais da Admin API (estado de runtime já no boot).
+# Mutáveis em runtime via `mocksmith inject` / POST /__mocksmith/runtime.
+# Campos: status (int) | latencyMs (int) | rate (0..1, fração afetada pelo status)
+# -----------------------------------------------------------------------------
+overrides:
+
+  # Usuário: metade das requisições cai em 503, todas com 1.5s de latência.
+  /users/{userId}:
+    status: 503
+    latencyMs: 1500
+    rate: 0.5
+
+  # Health check: sempre lento (200ms), sem mudar status.
+  /health:
+    latencyMs: 200
+
+  # Refresh de token: sempre expirado (401) no boot.
+  /auth/refresh:
+    status: 401
