@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/Claudio712005/mock-smith/internal/domain"
 	"github.com/Claudio712005/mock-smith/internal/interceptor"
@@ -12,13 +11,18 @@ import (
 )
 
 // Options reúne as configurações de um Runtime: caminho da spec, endereço de
-// escuta, profile de execução e um status forçado opcional.
+// escuta, profile de execução, status forçado e comportamentos por endpoint
+// (latência, falha, timeout, corrupção). Cada campo por endpoint aceita várias
+// entradas no formato "path=valor"; sem "=", a entrada vale para todos.
 type Options struct {
 	SpecPath    string
 	Addr        string
 	Profile     string
 	ForceStatus int
-	Slow        time.Duration
+	Slow        []string
+	Fail        []string
+	Timeout     []string
+	Corrupt     []string
 }
 
 // Runtime guarda os endpoints carregados e os serve via HTTP.
@@ -54,13 +58,9 @@ func New(opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("no endpoints found in %q", opts.SpecPath)
 	}
 
-	if opts.Slow < 0 {
-		return nil, fmt.Errorf("invalid --slow %s (must be >= 0)", opts.Slow)
-	}
-
-	var chain interceptor.Chain
-	if opts.Slow > 0 {
-		chain = append(chain, interceptor.LatencyInterceptor{Delay: opts.Slow})
+	chain, err := buildChain(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	return &Runtime{opts: opts, endpoints: endpoints, scenario: scen, chain: chain}, nil
@@ -73,11 +73,11 @@ func (r *Runtime) Run() error {
 	fmt.Printf("MockSmith running on %s\n", r.opts.Addr)
 	fmt.Printf("Loaded %d endpoints\n", len(r.endpoints))
 	fmt.Printf("Profile: %s\n", r.opts.Profile)
-	if r.opts.Slow > 0 {
-		fmt.Printf("Adding %s latency to every response\n", r.opts.Slow)
-	}
 	if r.opts.ForceStatus != 0 {
 		fmt.Printf("Forcing status %d on endpoints that document it\n", r.opts.ForceStatus)
+	}
+	if n := len(r.chain); n > 0 {
+		fmt.Printf("Active interceptors: %d\n", n)
 	}
 
 	return srv.ListenAndServe()

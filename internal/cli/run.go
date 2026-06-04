@@ -2,7 +2,6 @@ package cli
 
 import (
 	"strings"
-	"time"
 
 	"github.com/Claudio712005/mock-smith/internal/app"
 	"github.com/Claudio712005/mock-smith/internal/scenario"
@@ -14,7 +13,10 @@ func newRunCmd() *cobra.Command {
 		addr        string
 		profile     string
 		forceStatus int
-		slow        time.Duration
+		slow        []string
+		fail        []string
+		timeout     []string
+		corrupt     []string
 	)
 
 	cmd := &cobra.Command{
@@ -22,7 +24,9 @@ func newRunCmd() *cobra.Command {
 		Short: "Start a mock server from an OpenAPI spec",
 		Args:  cobra.ExactArgs(1),
 		Example: "  mocksmith run openapi.yaml\n" +
-			"  mocksmith run openapi.yaml --addr :9090",
+			"  mocksmith run openapi.yaml --addr :9090\n" +
+			"  mocksmith run openapi.yaml --slow /payments=2s --fail /auth=503\n" +
+			"  mocksmith run openapi.yaml --timeout /jobs=20% --corrupt /users=10%",
 		RunE: func(_ *cobra.Command, args []string) error {
 			rt, err := app.New(app.Options{
 				SpecPath:    args[0],
@@ -30,6 +34,9 @@ func newRunCmd() *cobra.Command {
 				Profile:     profile,
 				ForceStatus: forceStatus,
 				Slow:        slow,
+				Fail:        fail,
+				Timeout:     timeout,
+				Corrupt:     corrupt,
 			})
 			if err != nil {
 				return err
@@ -43,7 +50,13 @@ func newRunCmd() *cobra.Command {
 		"runtime profile ("+strings.Join(scenario.Available(), ", ")+")")
 	cmd.Flags().IntVar(&forceStatus, "force-status", 0,
 		"force this HTTP status on endpoints that document it; others follow the profile (0 = off)")
-	cmd.Flags().DurationVar(&slow, "slow", 0,
-		"add this latency to every response, e.g. 2s (0 = off)")
+	cmd.Flags().StringArrayVar(&slow, "slow", nil,
+		"add latency, [path=]duration, e.g. /pets=2s or 2s for all (repeatable)")
+	cmd.Flags().StringArrayVar(&fail, "fail", nil,
+		"force a status, [path=]status, e.g. /payments=503 (repeatable)")
+	cmd.Flags().StringArrayVar(&timeout, "timeout", nil,
+		"inject timeouts (504) at a rate, [path=]rate, e.g. /auth=20% (repeatable)")
+	cmd.Flags().StringArrayVar(&corrupt, "corrupt", nil,
+		"corrupt the JSON body at a rate, [path=]rate, e.g. /users=10% (repeatable)")
 	return cmd
 }

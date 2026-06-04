@@ -249,6 +249,31 @@ func TestE2E_SlowLatency_DelaysResponse(t *testing.T) {
 	}
 }
 
+func TestE2E_ScopedFail_OnlyTargetEndpoint(t *testing.T) {
+	chain := interceptor.Chain{interceptor.ScopedInterceptor{
+		Path:  "/payments",
+		Inner: interceptor.FailureInterceptor{Status: 503, Rate: 1, Rand: func() float64 { return 0 }},
+	}}
+	srv := httptransport.New(":0", loadEndpoints(t), nil, chain)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := ts.Client().Post(ts.URL+"/payments", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /payments: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 503 {
+		t.Fatalf("/payments status = %d, want 503 (scoped fail)", resp.StatusCode)
+	}
+
+	resp2 := getJSON(t, ts, "/pets", nil)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("/pets status = %d, want 200 (out of scope)", resp2.StatusCode)
+	}
+}
+
 func TestE2E_NotFound(t *testing.T) {
 	ts := startServer(t)
 	resp := getJSON(t, ts, "/does-not-exist", nil)
@@ -257,8 +282,6 @@ func TestE2E_NotFound(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
-
-// --- SpringBoot legacy spec (string examples on integer fields) ---
 
 func loadSpringBootLegacyEndpoints(t *testing.T) []domain.Endpoint {
 	t.Helper()
@@ -281,12 +304,7 @@ func startSpringBootLegacyServer(t *testing.T) *httptest.Server {
 	return ts
 }
 
-// TestE2E_SpringBootLegacy_SpecLoads verifica que specs geradas pelo Spring Boot
-// com exemplos string em campos integer são carregadas sem erro de validação.
 func TestE2E_SpringBootLegacy_SpecLoads(t *testing.T) {
-	// loadSpringBootLegacyEndpoints chama openapi.Load internamente; se o fix de
-	// DisableExamplesValidation não estiver presente, o teste falha aqui com:
-	// "invalid example: validation failed due to: at '': got string, want integer"
 	eps := loadSpringBootLegacyEndpoints(t)
 	paths := make(map[string]bool, len(eps))
 	for _, ep := range eps {
@@ -299,8 +317,6 @@ func TestE2E_SpringBootLegacy_SpecLoads(t *testing.T) {
 	}
 }
 
-// TestE2E_SpringBootLegacy_V1_Returns200 exercita o endpoint v1 com campos integer
-// cujo exemplo é uma string ("0001", "05") — padrão Spring Boot codegen.
 func TestE2E_SpringBootLegacy_V1_Returns200(t *testing.T) {
 	ts := startSpringBootLegacyServer(t)
 
@@ -319,8 +335,6 @@ func TestE2E_SpringBootLegacy_V1_Returns200(t *testing.T) {
 	}
 }
 
-// TestE2E_SpringBootLegacy_V2_Returns200 exercita o endpoint v2 cujo schema
-// usa campos string com pattern alfanumérico (sem exemplos inválidos).
 func TestE2E_SpringBootLegacy_V2_Returns200(t *testing.T) {
 	ts := startSpringBootLegacyServer(t)
 
@@ -339,8 +353,6 @@ func TestE2E_SpringBootLegacy_V2_Returns200(t *testing.T) {
 	}
 }
 
-// TestE2E_SpringBootLegacy_AdminListsEndpoints confirma que os dois endpoints
-// do spec springboot-legacy aparecem na listagem administrativa do MockSmith.
 func TestE2E_SpringBootLegacy_AdminListsEndpoints(t *testing.T) {
 	ts := startSpringBootLegacyServer(t)
 

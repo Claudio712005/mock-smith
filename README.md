@@ -19,11 +19,12 @@ Loaded 23 endpoints
 Profile: happy
 ```
 
-> Status: **Fase 3**. Carrega a spec, descobre os endpoints e serve respostas
+> Status: **Fase 4**. Carrega a spec, descobre os endpoints e serve respostas
 > guiadas por um **profile de runtime** (`happy`, `sad`, `resilience`, `chaos`) —
 > sucesso, erro de negócio, erro de servidor, timeout, corpo malformado e
 > desconexão. Um **pipeline de interceptors** compõe comportamentos sobre o
-> profile (ex.: `--slow` adiciona latência). Flags por endpoint no roadmap abaixo.
+> profile, configuráveis **por endpoint** via flags (`--slow`, `--fail`,
+> `--timeout`, `--corrupt`). Cenários stateful no roadmap abaixo.
 
 ---
 
@@ -122,20 +123,40 @@ Interceptors disponíveis no engine:
 | `TimeoutInterceptor`    | Sobrescreve com timeout (504) numa fração das requisições.   |
 | `CorruptionInterceptor` | Sobrescreve com corpo malformado numa fração das requisições.|
 
-### Latência (`--slow`)
+### Flags por endpoint
 
-`--slow <duração>` injeta o `LatencyInterceptor`, somando a latência a **toda**
-resposta. Aceita qualquer duração Go (`500ms`, `2s`, `1m`). `0` (padrão) desliga;
-valores negativos são rejeitados. Respeita o cancelamento do cliente: se a
-conexão cair durante a espera, a requisição é abortada.
+Quatro flags injetam interceptors. Todas são **repetíveis** e usam o formato
+`[path=]valor`: com `path=`, o efeito vale só naquele endpoint (casamento exato
+contra o template OpenAPI, ex.: `/pets/{petId}`); sem `path=`, vale para **todos**.
+Endpoints fora do escopo seguem o profile normalmente.
+
+| Flag        | Valor             | Efeito                                                        |
+|-------------|-------------------|--------------------------------------------------------------|
+| `--slow`    | duração (`2s`)    | Adiciona latência à resposta. Respeita o cancelamento do cliente. |
+| `--fail`    | status (`503`)    | Força esse status HTTP (sempre).                             |
+| `--timeout` | taxa (`20%`)      | Injeta timeout (504, após ~30s) nessa fração das requisições. |
+| `--corrupt` | taxa (`10%`)      | Corrompe o corpo JSON nessa fração das requisições.          |
+
+Taxa aceita `20%` ou `0.2`. Duração aceita qualquer formato Go (`500ms`, `2s`,
+`1m`). Valores inválidos (duração ruim, status fora de `100–599`, taxa fora de
+`0–100%`) são rejeitados na inicialização.
 
 ```bash
-mocksmith run examples/petstore.yaml --slow 2s
-mocksmith run examples/petstore.yaml --profile resilience --slow 500ms
+# 2s de latência só em /payments; o resto responde na hora
+mocksmith run examples/petstore.yaml --slow /payments=2s
+
+# compõe vários comportamentos, por endpoint
+mocksmith run examples/petstore.yaml \
+  --fail /payments=503 \
+  --timeout /pets=20% \
+  --corrupt /users/{id}=10%
+
+# latência global (sem path) + falha pontual
+mocksmith run examples/petstore.yaml --slow 300ms --fail /payments=503
 ```
 
-> Os demais interceptors (`failure`, `timeout`, `corrupt`) ganham flags por
-> endpoint na Fase 4 — ver [PLAN.md](PLAN.md).
+> `--retry`/`--sequence` (respostas em sequência, ex.: `202,202,200`) precisam de
+> estado por endpoint e ficam para a Fase 5 — ver [PLAN.md](PLAN.md).
 
 ---
 
@@ -313,7 +334,10 @@ Sobe um servidor de mock a partir de uma spec OpenAPI.
 | `--addr`       | `:8080`   | Endereço em que o servidor escuta.              |
 | `--profile`    | `happy`   | Profile de runtime: `happy`, `sad`, `resilience`, `chaos` (ver [Profiles](#profiles)). |
 | `--force-status` | `0`     | Força esse status nos endpoints que o documentam; os demais seguem o profile (`0` = off). Ver [Forçar um status](#forçar-um-status---force-status). |
-| `--slow`       | `0`       | Adiciona latência a toda resposta, ex.: `2s` (`0` = off). Ver [Interceptors](#interceptors). |
+| `--slow`       | —         | `[path=]duração`, ex.: `/pets=2s`. Repetível. Ver [Flags por endpoint](#flags-por-endpoint). |
+| `--fail`       | —         | `[path=]status`, ex.: `/payments=503`. Repetível. |
+| `--timeout`    | —         | `[path=]taxa`, ex.: `/auth=20%`. Repetível. |
+| `--corrupt`    | —         | `[path=]taxa`, ex.: `/users=10%`. Repetível. |
 | `-h`, `--help` | —         | Ajuda do comando.                               |
 
 ### Global

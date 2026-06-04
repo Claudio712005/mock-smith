@@ -74,8 +74,6 @@ func TestLoad_ExampleSpec(t *testing.T) {
 	}
 }
 
-// TestLoad_SpringBootLegacyJSON garante que specs com exemplos string em campos
-// integer — padrão gerado pelo Spring Boot codegen — são carregadas sem erro.
 func TestLoad_SpringBootLegacyJSON(t *testing.T) {
 	doc, err := Load(filepath.Join("..", "..", "examples", "springboot-legacy.json"))
 	if err != nil {
@@ -92,9 +90,6 @@ func TestLoad_SpringBootLegacyJSON(t *testing.T) {
 	}
 }
 
-// TestLoad_StringExampleOnIntegerField garante que specs com exemplos de tipo
-// incorreto (string em campo integer, comum em specs geradas por Spring Boot)
-// são carregadas sem erro, com a validação de exemplos desabilitada.
 func TestLoad_StringExampleOnIntegerField(t *testing.T) {
 	const spec = `
 openapi: "3.1.0"

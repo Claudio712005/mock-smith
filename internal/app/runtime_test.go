@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 const pingSpec = `
@@ -103,13 +102,37 @@ func TestNew_UnknownProfile(t *testing.T) {
 }
 
 func TestNew_Slow_Valid(t *testing.T) {
-	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Slow: 2 * time.Second}); err != nil {
-		t.Fatalf("New(slow 2s) error = %v", err)
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Slow: []string{"/ping=2s", "1s"}}); err != nil {
+		t.Fatalf("New(slow) error = %v", err)
 	}
 }
 
-func TestNew_Slow_Negative(t *testing.T) {
-	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Slow: -1}); err == nil {
-		t.Fatal("New(slow -1) expected error, got nil")
+func TestNew_Slow_Invalid(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Slow: []string{"/ping=nope"}}); err == nil {
+		t.Fatal("New(slow bad duration) expected error, got nil")
+	}
+}
+
+func TestNew_Fail_Valid(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Fail: []string{"/ping=503"}}); err != nil {
+		t.Fatalf("New(fail) error = %v", err)
+	}
+}
+
+func TestNew_Fail_Invalid(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Fail: []string{"/ping=99"}}); err == nil {
+		t.Fatal("New(fail bad status) expected error, got nil")
+	}
+}
+
+func TestNew_Timeout_Valid(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Timeout: []string{"/ping=20%"}}); err != nil {
+		t.Fatalf("New(timeout) error = %v", err)
+	}
+}
+
+func TestNew_Corrupt_Invalid(t *testing.T) {
+	if _, err := New(Options{SpecPath: writeSpec(t, pingSpec), Profile: "happy", Corrupt: []string{"/ping=200%"}}); err == nil {
+		t.Fatal("New(corrupt rate>100%) expected error, got nil")
 	}
 }
