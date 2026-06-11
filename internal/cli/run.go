@@ -41,7 +41,18 @@ func newRunCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				opts = cfg.ToOptions()
+				servers, err := cfg.ServerList()
+				if err != nil {
+					return err
+				}
+				// Vários servers: só via config, sem flags de comportamento.
+				if len(servers) > 1 {
+					return runMultiServer(servers, configPath)
+				}
+				opts, err = servers[0].ToOptions()
+				if err != nil {
+					return err
+				}
 			}
 
 			if cmd.Flags().Changed("addr") || opts.Addr == "" {
@@ -56,10 +67,7 @@ func newRunCmd() *cobra.Command {
 
 			// Spec do config resolve relativo ao diretório do arquivo de config;
 			// spec posicional resolve relativo ao diretório atual.
-			spec := opts.SpecPath
-			if spec != "" && !filepath.IsAbs(spec) && configPath != "" {
-				spec = filepath.Join(filepath.Dir(configPath), spec)
-			}
+			spec := resolveSpec(opts.SpecPath, configPath)
 			if len(args) > 0 {
 				spec = args[0]
 			}
@@ -100,4 +108,37 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "",
 		"path to a YAML config file, e.g. "+config.DefaultFile)
 	return cmd
+}
+
+// resolveSpec resolve o caminho da spec do config relativo ao diretório do
+// arquivo de config (caminhos absolutos e spec vazia passam direto).
+func resolveSpec(spec, configPath string) string {
+	if spec == "" || filepath.IsAbs(spec) || configPath == "" {
+		return spec
+	}
+	return filepath.Join(filepath.Dir(configPath), spec)
+}
+
+// runMultiServer sobe um server por entrada do bloco "servers". As flags de
+// comportamento não se aplicam aqui — tudo vem do config.
+func runMultiServer(servers []config.ServerConfig, configPath string) error {
+	list := make([]app.Options, 0, len(servers))
+	for i, sc := range servers {
+		opts, err := sc.ToOptions()
+		if err != nil {
+			return err
+		}
+		if opts.SpecPath == "" {
+			return fmt.Errorf("server %d: missing 'spec'", i+1)
+		}
+		opts.SpecPath = resolveSpec(opts.SpecPath, configPath)
+		if opts.Addr == "" {
+			return fmt.Errorf("server %q: missing 'addr'", sc.Spec)
+		}
+		if opts.Profile == "" {
+			opts.Profile = "happy"
+		}
+		list = append(list, opts)
+	}
+	return app.RunMany(list)
 }

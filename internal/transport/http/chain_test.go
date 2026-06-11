@@ -15,7 +15,7 @@ import (
 func TestChain_LatencyDelaysResponse(t *testing.T) {
 	ep := domain.Endpoint{Method: "GET", Path: "/x", SuccessResponse: objectSpec(200)}
 	chain := interceptor.Chain{interceptor.LatencyInterceptor{Delay: 30 * time.Millisecond}}
-	srv := New(":0", []domain.Endpoint{ep}, nil, chain, nil)
+	srv := New(":0", []domain.Endpoint{ep}, nil, chain, nil, nil)
 
 	req := httptest.NewRequest("GET", "/x", nil)
 	rec := httptest.NewRecorder()
@@ -35,7 +35,7 @@ func TestChain_FailureOverridesResultOnHappy(t *testing.T) {
 	chain := interceptor.Chain{interceptor.FailureInterceptor{
 		Status: 500, Rate: 1, Rand: func() float64 { return 0 },
 	}}
-	srv := New(":0", []domain.Endpoint{ep}, nil, chain, nil)
+	srv := New(":0", []domain.Endpoint{ep}, nil, chain, nil, nil)
 
 	req := httptest.NewRequest("GET", "/x", nil)
 	rec := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func TestChain_CorruptionOverridesBody(t *testing.T) {
 	chain := interceptor.Chain{interceptor.CorruptionInterceptor{
 		Rate: 1, Rand: func() float64 { return 0 },
 	}}
-	srv := New(":0", []domain.Endpoint{ep}, nil, chain, nil)
+	srv := New(":0", []domain.Endpoint{ep}, nil, chain, nil, nil)
 
 	req := httptest.NewRequest("GET", "/x", nil)
 	rec := httptest.NewRecorder()
@@ -69,7 +69,7 @@ func TestChain_CorruptionOverridesBody(t *testing.T) {
 
 func TestChain_NilIsNoop(t *testing.T) {
 	ep := domain.Endpoint{Method: "GET", Path: "/x", SuccessResponse: objectSpec(200)}
-	srv := New(":0", []domain.Endpoint{ep}, scenario.Always(scenario.Result{Kind: scenario.KindSuccess}), nil, nil)
+	srv := New(":0", []domain.Endpoint{ep}, scenario.Always(scenario.Result{Kind: scenario.KindSuccess}), nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/x", nil)
 	rec := httptest.NewRecorder()

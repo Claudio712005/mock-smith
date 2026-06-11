@@ -1,5 +1,6 @@
 // Package config carrega um arquivo mocksmith.yaml e o converte nas Options do
-// runtime. O config é a base; quem chama (a CLI) sobrepõe com as flags.
+// runtime. O config é a base; quem chama (a CLI) sobrepõe com as flags. Suporta
+// um único server (campos no topo) ou vários (bloco "servers").
 package config
 
 import (
@@ -18,23 +19,36 @@ import (
 // um caminho.
 const DefaultFile = "mocksmith.yaml"
 
-// Config é a forma declarativa do mocksmith.yaml.
+// Config é a forma declarativa do mocksmith.yaml. Os campos de server ficam
+// inline (modo single); o bloco "servers" liga o modo multi.
 type Config struct {
+	ServerConfig `yaml:",inline"`
+	Servers      []ServerConfig `yaml:"servers"`
+}
+
+// ServerConfig descreve um server: spec, escuta, profile e comportamentos e
+// regras de valor por endpoint.
+type ServerConfig struct {
 	Spec        string              `yaml:"spec"`
 	Addr        string              `yaml:"addr"`
 	Profile     string              `yaml:"profile"`
 	ForceStatus int                 `yaml:"forceStatus"`
 	Endpoints   map[string]Endpoint `yaml:"endpoints"`
 	Overrides   map[string]Override `yaml:"overrides"`
+	Values      map[string]any      `yaml:"values"`
+	Count       map[string]any      `yaml:"count"`
 }
 
-// Endpoint reúne os comportamentos por endpoint declarados no config.
+// Endpoint reúne, por endpoint, os comportamentos (fail/slow/...) e as regras de
+// valor (values/count).
 type Endpoint struct {
-	Fail     int    `yaml:"fail"`
-	Slow     string `yaml:"slow"`
-	Timeout  string `yaml:"timeout"`
-	Corrupt  string `yaml:"corrupt"`
-	Sequence []int  `yaml:"sequence"`
+	Fail     int            `yaml:"fail"`
+	Slow     string         `yaml:"slow"`
+	Timeout  string         `yaml:"timeout"`
+	Corrupt  string         `yaml:"corrupt"`
+	Sequence []int          `yaml:"sequence"`
+	Values   map[string]any `yaml:"values"`
+	Count    map[string]any `yaml:"count"`
 }
 
 // Override é o estado inicial de runtime de um endpoint (Admin API).
@@ -59,40 +73,51 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// ToOptions converte o config nas Options do runtime, traduzindo os blocos por
-// endpoint nas listas "path=valor" que o app já entende. Os endpoints são
-// percorridos em ordem estável.
-func (c *Config) ToOptions() app.Options {
+// ServerList resolve os servers declarados: o bloco "servers" se presente, senão
+// o server único inline.
+func (c *Config) ServerList() ([]ServerConfig, error) {
+	if len(c.Servers) > 0 {
+		if c.ServerConfig.Spec != "" {
+			return nil, fmt.Errorf("config has both a top-level 'spec' and a 'servers' block; use one or the other")
+		}
+		return c.Servers, nil
+	}
+	return []ServerConfig{c.ServerConfig}, nil
+}
+
+// ToOptions converte um server nas Options do runtime, traduzindo comportamentos
+// por endpoint nas listas "path=valor" e normalizando as regras de valor.
+func (s ServerConfig) ToOptions() (app.Options, error) {
 	opts := app.Options{
-		SpecPath:    c.Spec,
-		Addr:        c.Addr,
-		Profile:     c.Profile,
-		ForceStatus: c.ForceStatus,
+		SpecPath:    s.Spec,
+		Addr:        s.Addr,
+		Profile:     s.Profile,
+		ForceStatus: s.ForceStatus,
 	}
 
-	for _, path := range sortedKeys(c.Endpoints) {
-		ep := c.Endpoints[path]
+	for _, key := range sortedKeys(s.Endpoints) {
+		ep := s.Endpoints[key]
 		if ep.Slow != "" {
-			opts.Slow = append(opts.Slow, path+"="+ep.Slow)
+			opts.Slow = append(opts.Slow, key+"="+ep.Slow)
 		}
 		if ep.Fail != 0 {
-			opts.Fail = append(opts.Fail, path+"="+strconv.Itoa(ep.Fail))
+			opts.Fail = append(opts.Fail, key+"="+strconv.Itoa(ep.Fail))
 		}
 		if ep.Timeout != "" {
-			opts.Timeout = append(opts.Timeout, path+"="+ep.Timeout)
+			opts.Timeout = append(opts.Timeout, key+"="+ep.Timeout)
 		}
 		if ep.Corrupt != "" {
-			opts.Corrupt = append(opts.Corrupt, path+"="+ep.Corrupt)
+			opts.Corrupt = append(opts.Corrupt, key+"="+ep.Corrupt)
 		}
 		if len(ep.Sequence) > 0 {
-			opts.Sequence = append(opts.Sequence, path+"="+joinInts(ep.Sequence))
+			opts.Sequence = append(opts.Sequence, key+"="+joinInts(ep.Sequence))
 		}
 	}
 
-	if len(c.Overrides) > 0 {
-		opts.Overrides = make(map[string]interceptor.Override, len(c.Overrides))
-		for path, ov := range c.Overrides {
-			opts.Overrides[path] = interceptor.Override{
+	if len(s.Overrides) > 0 {
+		opts.Overrides = make(map[string]interceptor.Override, len(s.Overrides))
+		for key, ov := range s.Overrides {
+			opts.Overrides[key] = interceptor.Override{
 				Status:    ov.Status,
 				LatencyMs: ov.LatencyMs,
 				Rate:      ov.Rate,
@@ -100,7 +125,81 @@ func (c *Config) ToOptions() app.Options {
 		}
 	}
 
-	return opts
+	global, err := toRuleSet(s.Values, s.Count)
+	if err != nil {
+		return app.Options{}, fmt.Errorf("global rules: %w", err)
+	}
+	opts.GlobalRules = global
+
+	for _, key := range sortedKeys(s.Endpoints) {
+		ep := s.Endpoints[key]
+		if len(ep.Values) == 0 && len(ep.Count) == 0 {
+			continue
+		}
+		rs, err := toRuleSet(ep.Values, ep.Count)
+		if err != nil {
+			return app.Options{}, fmt.Errorf("rules for %q: %w", key, err)
+		}
+		if opts.EndpointRules == nil {
+			opts.EndpointRules = map[string]app.ValueRuleSet{}
+		}
+		opts.EndpointRules[key] = rs
+	}
+
+	return opts, nil
+}
+
+func toRuleSet(values, count map[string]any) (app.ValueRuleSet, error) {
+	rs := app.ValueRuleSet{}
+	if len(values) > 0 {
+		rs.Values = make(map[string][]any, len(values))
+		for matcher, v := range values {
+			rs.Values[matcher] = asList(v)
+		}
+	}
+	if len(count) > 0 {
+		rs.Counts = make(map[string][]any, len(count))
+		for matcher, v := range count {
+			items, err := normalizeCount(v)
+			if err != nil {
+				return app.ValueRuleSet{}, fmt.Errorf("count %q: %w", matcher, err)
+			}
+			rs.Counts[matcher] = items
+		}
+	}
+	return rs, nil
+}
+
+// asList normaliza um valor em uma lista (escalar vira lista de um item).
+func asList(v any) []any {
+	if l, ok := v.([]any); ok {
+		return l
+	}
+	return []any{v}
+}
+
+// normalizeCount valida que cada item é int (quantidade) ou nil (null no lugar
+// da lista). Aceita um int solto como lista de um item.
+func normalizeCount(v any) ([]any, error) {
+	raw := asList(v)
+	out := make([]any, 0, len(raw))
+	for _, item := range raw {
+		switch n := item.(type) {
+		case nil:
+			out = append(out, nil)
+		case int:
+			if n < 0 {
+				return nil, fmt.Errorf("negative count %d", n)
+			}
+			out = append(out, n)
+		default:
+			return nil, fmt.Errorf("invalid count item %v (want int or null)", item)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("empty count")
+	}
+	return out, nil
 }
 
 func sortedKeys(m map[string]Endpoint) []string {

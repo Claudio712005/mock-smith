@@ -1,0 +1,37 @@
+# =============================================================================
+# MockSmith — exemplo multi-server
+#
+# Sobe vários mocks de uma vez, um por porta, com um único comando:
+#   mocksmith run --config examples/multi-server.yaml
+#
+# O bloco "servers" liga o modo multi. Cada server tem spec, porta, profile,
+# comportamentos, overrides e regras de valor próprios. As flags da CLI não se
+# aplicam aqui — tudo vem deste arquivo. O "spec" resolve relativo a esta pasta.
+# =============================================================================
+
+servers:
+
+  # Server 1 — catálogo, resiliente, com listagem de tamanho controlado.
+  - spec: shop-api.yaml
+    addr: ":8080"
+    profile: resilience
+    endpoints:
+      POST /payments:
+        fail: 503            # provider de pagamento fora do ar
+      GET /products:
+        count:
+          $: [3, 6, 9]       # listagem cicla de tamanho por chamada
+        values:
+          status: ["available"]
+
+  # Server 2 — petstore, happy, com um polling e um valor fixo.
+  - spec: petstore.yaml
+    addr: ":8081"
+    profile: happy
+    endpoints:
+      GET /pets:
+        count:
+          $: [2]             # sempre 2 pets
+    overrides:
+      POST /payments:
+        status: 503          # já começa fora do ar (mutável via inject)

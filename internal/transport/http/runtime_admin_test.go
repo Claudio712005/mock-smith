@@ -12,7 +12,7 @@ import (
 
 func runtimeServer() *Server {
 	ep := domain.Endpoint{Method: "POST", Path: "/payments", SuccessResponse: objectSpec(201)}
-	return New(":0", []domain.Endpoint{ep}, nil, nil, nil)
+	return New(":0", []domain.Endpoint{ep}, nil, nil, nil, nil)
 }
 
 func postJSON(t *testing.T, srv *Server, target string, body any) *http.Response {

@@ -10,11 +10,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Claudio712005/mock-smith/internal/config"
 	"github.com/Claudio712005/mock-smith/internal/domain"
+	"github.com/Claudio712005/mock-smith/internal/faker"
 	"github.com/Claudio712005/mock-smith/internal/interceptor"
 	"github.com/Claudio712005/mock-smith/internal/openapi"
 	"github.com/Claudio712005/mock-smith/internal/scenario"
@@ -36,7 +38,7 @@ func loadEndpoints(t *testing.T) []domain.Endpoint {
 
 func startServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptransport.New(":0", loadEndpoints(t), nil, nil, nil)
+	srv := httptransport.New(":0", loadEndpoints(t), nil, nil, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -44,7 +46,7 @@ func startServer(t *testing.T) *httptest.Server {
 
 func startServerScenario(t *testing.T, scen scenario.Scenario) *httptest.Server {
 	t.Helper()
-	srv := httptransport.New(":0", loadEndpoints(t), scen, nil, nil)
+	srv := httptransport.New(":0", loadEndpoints(t), scen, nil, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -237,7 +239,7 @@ func TestE2E_ForceStatus_OnlyMappedEndpoints(t *testing.T) {
 
 func TestE2E_SlowLatency_DelaysResponse(t *testing.T) {
 	chain := interceptor.Chain{interceptor.LatencyInterceptor{Delay: 40 * time.Millisecond}}
-	srv := httptransport.New(":0", loadEndpoints(t), nil, chain, nil)
+	srv := httptransport.New(":0", loadEndpoints(t), nil, chain, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -257,7 +259,7 @@ func TestE2E_ScopedFail_OnlyTargetEndpoint(t *testing.T) {
 		Path:  "/payments",
 		Inner: interceptor.FailureInterceptor{Status: 503, Rate: 1, Rand: func() float64 { return 0 }},
 	}}
-	srv := httptransport.New(":0", loadEndpoints(t), nil, chain, nil)
+	srv := httptransport.New(":0", loadEndpoints(t), nil, chain, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -282,7 +284,7 @@ func TestE2E_Sequence_AdvancesThenSticks(t *testing.T) {
 		Path:  "/payments",
 		Inner: &interceptor.SequenceInterceptor{Statuses: []int{503, 503, 201}},
 	}}
-	srv := httptransport.New(":0", loadEndpoints(t), nil, chain, nil)
+	srv := httptransport.New(":0", loadEndpoints(t), nil, chain, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -375,7 +377,10 @@ overrides:
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	opts := c.ToOptions()
+	opts, err := c.ServerConfig.ToOptions()
+	if err != nil {
+		t.Fatalf("ToOptions: %v", err)
+	}
 
 	scen, err := scenario.ForProfile(opts.Profile)
 	if err != nil {
@@ -385,7 +390,7 @@ overrides:
 		Path:  "/payments",
 		Inner: interceptor.FailureInterceptor{Status: 503, Rate: 1, Rand: func() float64 { return 0 }},
 	}}
-	srv := httptransport.New(":0", loadEndpoints(t), scen, chain, opts.Overrides)
+	srv := httptransport.New(":0", loadEndpoints(t), scen, chain, opts.Overrides, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -413,7 +418,7 @@ func TestE2E_ShopAPI_LoadsAndServes(t *testing.T) {
 	if len(eps) < 25 {
 		t.Fatalf("discovered %d endpoints, want >= 25", len(eps))
 	}
-	srv := httptransport.New(":0", eps, nil, nil, nil)
+	srv := httptransport.New(":0", eps, nil, nil, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -434,6 +439,48 @@ func TestE2E_ShopAPI_LoadsAndServes(t *testing.T) {
 	resp2.Body.Close()
 	if user["name"] != "Grace Hopper" {
 		t.Errorf("user media example not used: %v", user["name"])
+	}
+}
+
+func TestE2E_ValueRules_CountAndValues(t *testing.T) {
+	doc, err := openapi.Load(filepath.Join("..", "examples", "shop-api.yaml"))
+	if err != nil {
+		t.Fatalf("load shop-api: %v", err)
+	}
+	eps := openapi.Discover(doc)
+
+	rules := faker.NewRules()
+	rules.SetCount("$", []any{2, nil, 4})
+	rules.SetValues("name", []any{"FIXO"})
+
+	srv := httptransport.New(":0", eps, nil, nil, nil, map[string]*faker.Rules{
+		"GET /products": rules,
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// call 1: 2 items, name forced.
+	var p1 []map[string]any
+	r1 := getJSON(t, ts, "/products", &p1)
+	r1.Body.Close()
+	if len(p1) != 2 || p1[0]["name"] != "FIXO" {
+		t.Fatalf("call1 len=%d name=%v, want 2 / FIXO", len(p1), p1[0]["name"])
+	}
+
+	// call 2: null (count cycle hits nil).
+	r2 := getJSON(t, ts, "/products", nil)
+	body, _ := io.ReadAll(r2.Body)
+	r2.Body.Close()
+	if strings.TrimSpace(string(body)) != "null" {
+		t.Fatalf("call2 body = %q, want null", body)
+	}
+
+	// call 3: 4 items.
+	var p3 []map[string]any
+	r3 := getJSON(t, ts, "/products", &p3)
+	r3.Body.Close()
+	if len(p3) != 4 {
+		t.Fatalf("call3 len = %d, want 4", len(p3))
 	}
 }
 
@@ -461,7 +508,7 @@ func loadSpringBootLegacyEndpoints(t *testing.T) []domain.Endpoint {
 
 func startSpringBootLegacyServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptransport.New(":0", loadSpringBootLegacyEndpoints(t), nil, nil, nil)
+	srv := httptransport.New(":0", loadSpringBootLegacyEndpoints(t), nil, nil, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts

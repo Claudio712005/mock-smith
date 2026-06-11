@@ -9,14 +9,45 @@ import (
 
 const maxDepth = 12
 
-// Generate gera um valor para o schema informado. Resolve, nesta ordem:
-// exemplo do schema, default, primeiro valor do enum e, por fim, dado falso
-// conforme tipo/formato. Retorna nil para schema vazio ou tipo não suportado.
+// Generate gera um valor para o schema informado, sem regras de sobrescrita.
+// Resolve, nesta ordem: exemplo do schema, default, primeiro valor do enum e,
+// por fim, dado falso conforme tipo/formato. Retorna nil para schema vazio ou
+// tipo não suportado.
 func Generate(ref *openapi3.SchemaRef) any {
-	return generate(ref, 0)
+	return GenerateWith(ref, nil)
 }
 
-func generate(ref *openapi3.SchemaRef, depth int) any {
+// GenerateWith gera um valor aplicando Rules: sobrescritas de valores literais
+// por campo e tamanhos de lista (incluindo null no lugar da lista). rules nil
+// equivale a Generate.
+func GenerateWith(ref *openapi3.SchemaRef, rules *Rules) any {
+	g := gen{rules: rules, resolved: map[*cycle]any{}}
+	if rules != nil {
+		if c, ok := rules.value("$", ""); ok {
+			return g.resolve(c)
+		}
+	}
+	return g.generate(ref, "$", "", 0)
+}
+
+// gen carrega as regras e um cache por chamada: um mesmo matcher avança o ciclo
+// uma única vez por resposta, então todos os campos que ele casa recebem o mesmo
+// valor (e o ciclo só anda de uma requisição para a outra).
+type gen struct {
+	rules    *Rules
+	resolved map[*cycle]any
+}
+
+func (g gen) resolve(c *cycle) any {
+	if v, ok := g.resolved[c]; ok {
+		return v
+	}
+	v := c.next()
+	g.resolved[c] = v
+	return v
+}
+
+func (g gen) generate(ref *openapi3.SchemaRef, path, name string, depth int) any {
 	if ref == nil || ref.Value == nil || depth > maxDepth {
 		return nil
 	}
@@ -34,9 +65,9 @@ func generate(ref *openapi3.SchemaRef, depth int) any {
 
 	switch {
 	case schema.Type.Is(openapi3.TypeObject) || len(schema.Properties) > 0:
-		return generateObject(schema, depth)
+		return g.generateObject(schema, path, depth)
 	case schema.Type.Is(openapi3.TypeArray):
-		return generateArray(schema, depth)
+		return g.generateArray(schema, path, name, depth)
 	case schema.Type.Is(openapi3.TypeString):
 		return generateString(schema)
 	case schema.Type.Is(openapi3.TypeInteger):
@@ -48,30 +79,59 @@ func generate(ref *openapi3.SchemaRef, depth int) any {
 	}
 
 	if len(schema.AllOf) > 0 {
-		return generate(schema.AllOf[0], depth+1)
+		return g.generate(schema.AllOf[0], path, name, depth+1)
 	}
 	if len(schema.OneOf) > 0 {
-		return generate(schema.OneOf[0], depth+1)
+		return g.generate(schema.OneOf[0], path, name, depth+1)
 	}
 	if len(schema.AnyOf) > 0 {
-		return generate(schema.AnyOf[0], depth+1)
+		return g.generate(schema.AnyOf[0], path, name, depth+1)
 	}
 
 	return nil
 }
 
-func generateObject(schema *openapi3.Schema, depth int) map[string]any {
+func (g gen) generateObject(schema *openapi3.Schema, path string, depth int) map[string]any {
 	out := make(map[string]any, len(schema.Properties))
 	for name, prop := range schema.Properties {
-		out[name] = generate(prop, depth+1)
+		childPath := child(path, name)
+		if g.rules != nil {
+			if c, ok := g.rules.value(childPath, name); ok {
+				out[name] = g.resolve(c)
+				continue
+			}
+		}
+		out[name] = g.generate(prop, childPath, name, depth+1)
 	}
 	return out
 }
 
-func generateArray(schema *openapi3.Schema, depth int) []any {
-	if schema.Items == nil {
-		return []any{}
+func (g gen) generateArray(schema *openapi3.Schema, path, name string, depth int) any {
+	n := defaultArrayLen(schema)
+	if g.rules != nil {
+		if c, ok := g.rules.count(path, name); ok {
+			switch v := g.resolve(c).(type) {
+			case nil:
+				return nil
+			case int:
+				n = v
+			}
+		}
 	}
+	if n < 0 {
+		n = 0
+	}
+	if schema.Items == nil {
+		return make([]any, 0)
+	}
+	out := make([]any, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, g.generate(schema.Items, path, name, depth+1))
+	}
+	return out
+}
+
+func defaultArrayLen(schema *openapi3.Schema) int {
 	n := 1
 	if schema.MinItems > 0 {
 		n = int(schema.MinItems)
@@ -79,11 +139,16 @@ func generateArray(schema *openapi3.Schema, depth int) []any {
 	if schema.MaxItems != nil && uint64(n) > *schema.MaxItems {
 		n = int(*schema.MaxItems)
 	}
-	out := make([]any, 0, n)
-	for i := 0; i < n; i++ {
-		out = append(out, generate(schema.Items, depth+1))
+	return n
+}
+
+// child compõe o caminho de um campo filho. A raiz ("$") e o vazio não viram
+// prefixo, então os campos de topo são referenciados pelo nome solto.
+func child(parent, field string) string {
+	if parent == "" || parent == "$" {
+		return field
 	}
-	return out
+	return parent + "." + field
 }
 
 func generateString(schema *openapi3.Schema) any {

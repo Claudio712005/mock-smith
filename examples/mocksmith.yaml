@@ -28,6 +28,15 @@ profile: resilience
 forceStatus: 0
 
 # -----------------------------------------------------------------------------
+# Regras de valor GLOBAIS (valem pra todo endpoint deste server).
+# Sobrescrevem o que o faker geraria. Matcher = nome do campo, caminho ou "$".
+#   values: lista de valores literais que cicla por chamada (aceita null)
+#   count:  tamanho de lista (int fixo ou lista ciclando; null = null no lugar)
+# -----------------------------------------------------------------------------
+values:
+  status: ["available"]   # qualquer campo "status" fica fixo
+
+# -----------------------------------------------------------------------------
 # Comportamentos por endpoint.
 # Chave = "[MÉTODO ]path"; o path é o template OpenAPI exato (igual ao que aparece
 # em /__mocksmith/endpoints). Sem método, vale para qualquer verbo daquele path.
@@ -75,6 +84,14 @@ endpoints:
   # Reviews: caos pontual de servidor.
   /products/{productId}/reviews:
     fail: 500
+
+  # Regras de valor por endpoint (vencem as globais).
+  # A listagem raiz cicla de tamanho; "name" fica fixo só aqui.
+  GET /products:
+    count:
+      $: [5, 2, 8]            # 1ª chamada → 5 itens, 2ª → 2, 3ª → 8, e cicla
+    values:
+      name: ["Produto Demo"]  # vence o gerado; só neste endpoint
 
 # -----------------------------------------------------------------------------
 # Overrides iniciais da Admin API (estado de runtime já no boot).

@@ -609,6 +609,68 @@ posicional ou do campo `spec:`. Chave desconhecida no YAML é erro.
 mocksmith run --config examples/mocksmith.yaml --profile happy
 ```
 
+### Regras de valor — controlar o corpo gerado
+
+Além do comportamento, o config pode sobrescrever **o que o faker gera**, por
+campo. Dois tipos de regra, globais (valem pra todo endpoint) ou dentro de um
+endpoint (vencem o global):
+
+- **`values`** — devolve valores literais no lugar do gerado. Lista que **cicla
+  por chamada** (e reinicia ao fim); aceita `null`.
+- **`count`** — tamanho de uma lista. Int fixo ou lista ciclando; um `null` no
+  ciclo devolve `null` no lugar da lista inteira.
+
+O **matcher** (chave) mira o campo por: **nome** (`cpf`, casa em qualquer
+profundidade), **caminho exato** (`pessoa.cpf`, vence o nome) ou **`$`** (a
+resposta raiz, ex.: endpoint que devolve um array direto).
+
+```yaml
+spec: pessoas.yaml
+values:                        # global do server
+  cpf: [null, "111.111.111-11"]   # 1ª chamada → null, 2ª → cpf, 3ª → null...
+endpoints:
+  GET /pessoas:
+    count:
+      $: [1, 3, 6, 7]          # lista raiz: 1 item, depois 3, 6, 7, e cicla
+      enderecos: 2             # campo "enderecos": sempre 2 itens
+    values:
+      pessoa.cpf: ["222.222.222-22"]   # só este caminho; vence o global "cpf"
+      tags: [null]             # devolve null no lugar da lista "tags"
+```
+
+Um mesmo matcher resolve **um valor por resposta** — todos os campos que ele casa
+naquela requisição recebem o mesmo valor; o ciclo só avança de uma chamada para a
+outra. Com regras definidas num endpoint, o corpo é sempre gerado do schema
+(mesmo havendo exemplo na spec), para as regras valerem.
+
+### Vários servers de uma vez (`servers`)
+
+Suba **um mock por spec, cada um em sua porta**, num único arquivo. Só pelo
+config — não há flag pra isso. O bloco `servers` e os campos de server no topo
+não coexistem.
+
+```yaml
+servers:
+  - spec: pagamentos.yaml      # relativo ao diretório do config
+    addr: ":8080"
+    profile: resilience
+    endpoints:
+      POST /pagamentos: { fail: 503 }
+  - spec: usuarios.yaml
+    addr: ":8081"
+    values:
+      cpf: ["000.000.000-00"]
+```
+
+```bash
+mocksmith run --config servers.yaml   # sobe :8080 e :8081 juntos
+```
+
+Cada server tem profile, comportamentos, overrides e regras de valor próprios.
+No modo multi as flags de comportamento da CLI são ignoradas (tudo vem do YAML).
+Se um server falhar ao subir (porta ocupada, spec inválida), o processo reporta o
+erro.
+
 ---
 
 ## Comandos & flags

@@ -28,7 +28,7 @@ var defaultScenario = scenario.Always(scenario.Result{Kind: scenario.KindSuccess
 // (sempre sucesso). A chain de interceptors é aplicada antes da escrita da
 // resposta. initialOverrides semeia o estado da Admin API (nil = vazio). Não
 // inicia o servidor; use ListenAndServe.
-func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario, chain interceptor.Chain, initialOverrides map[string]interceptor.Override) *Server {
+func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario, chain interceptor.Chain, initialOverrides map[string]interceptor.Override, valueRules map[string]*faker.Rules) *Server {
 	if scen == nil {
 		scen = defaultScenario
 	}
@@ -48,7 +48,8 @@ func New(addr string, endpoints []domain.Endpoint, scen scenario.Scenario, chain
 	registerAdmin(r, endpoints, overrides)
 
 	for _, ep := range endpoints {
-		r.MethodFunc(ep.Method, ep.Path, makeHandler(ep, scen, chain))
+		rules := valueRules[ep.Method+" "+ep.Path]
+		r.MethodFunc(ep.Method, ep.Path, makeHandler(ep, scen, chain, rules))
 	}
 
 	return &Server{addr: addr, router: r}
@@ -66,7 +67,7 @@ func (s *Server) ListenAndServe() error {
 	return http.ListenAndServe(s.addr, s.router)
 }
 
-func makeHandler(ep domain.Endpoint, scen scenario.Scenario, chain interceptor.Chain) http.HandlerFunc {
+func makeHandler(ep domain.Endpoint, scen scenario.Scenario, chain interceptor.Chain, rules *faker.Rules) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		res := scen.Resolve(&scenario.RequestContext{
 			Method:   ep.Method,
@@ -83,9 +84,9 @@ func makeHandler(ep domain.Endpoint, scen scenario.Scenario, chain interceptor.C
 
 		switch res.Kind {
 		case scenario.KindBusinessError:
-			writeBusinessError(w, ep)
+			writeBusinessError(w, ep, rules)
 		case scenario.KindServerError:
-			writeServerError(w, ep, res.Status)
+			writeServerError(w, ep, res.Status, rules)
 		case scenario.KindTimeout:
 			writeTimeout(w, req, res.Delay)
 		case scenario.KindMalformed:
@@ -93,37 +94,37 @@ func makeHandler(ep domain.Endpoint, scen scenario.Scenario, chain interceptor.C
 		case scenario.KindDisconnect:
 			disconnect(w, ep)
 		default:
-			writeSuccess(w, ep)
+			writeSuccess(w, ep, rules)
 		}
 	}
 }
 
-func writeSuccess(w http.ResponseWriter, ep domain.Endpoint) {
+func writeSuccess(w http.ResponseWriter, ep domain.Endpoint, rules *faker.Rules) {
 	spec := ep.SuccessResponse
 	if spec == nil {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	writeSpec(w, ep, *spec)
+	writeSpec(w, ep, *spec, rules)
 }
 
-func writeBusinessError(w http.ResponseWriter, ep domain.Endpoint) {
+func writeBusinessError(w http.ResponseWriter, ep domain.Endpoint, rules *faker.Rules) {
 	for _, e := range ep.ErrorResponses {
 		if e.StatusCode >= 400 && e.StatusCode < 500 {
-			writeSpec(w, ep, e)
+			writeSpec(w, ep, e, rules)
 			return
 		}
 	}
 	writeGenericError(w, http.StatusBadRequest)
 }
 
-func writeServerError(w http.ResponseWriter, ep domain.Endpoint, status int) {
+func writeServerError(w http.ResponseWriter, ep domain.Endpoint, status int, rules *faker.Rules) {
 	if status == 0 {
 		status = http.StatusInternalServerError
 	}
 	for _, e := range ep.ErrorResponses {
 		if e.StatusCode == status {
-			writeSpec(w, ep, e)
+			writeSpec(w, ep, e, rules)
 			return
 		}
 	}
@@ -158,15 +159,22 @@ func disconnect(w http.ResponseWriter, ep domain.Endpoint) {
 	_ = conn.Close()
 }
 
-func writeSpec(w http.ResponseWriter, ep domain.Endpoint, spec domain.ResponseSpec) {
+func writeSpec(w http.ResponseWriter, ep domain.Endpoint, spec domain.ResponseSpec, rules *faker.Rules) {
 	if !spec.HasBody() {
 		w.WriteHeader(spec.StatusCode)
 		return
 	}
 
-	body := spec.Example
-	if body == nil {
-		body = faker.Generate(spec.Schema)
+	// Com regras de valor definidas, geramos do schema para aplicá-las (mesmo
+	// havendo exemplo na spec). Sem regras, o exemplo documentado tem prioridade.
+	var body any
+	switch {
+	case !rules.Empty() && spec.Schema != nil:
+		body = faker.GenerateWith(spec.Schema, rules)
+	case spec.Example != nil:
+		body = spec.Example
+	default:
+		body = faker.GenerateWith(spec.Schema, rules)
 	}
 
 	w.Header().Set("Content-Type", spec.ContentType)
